@@ -191,7 +191,20 @@ st.markdown("""
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}
 
 /* Navigation buttons use the same green as the Reload last imported workbook button. */
+[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    width: 100% !important;
+}
 [data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label {
+    display: flex !important;
+    align-items: center !important;
+    width: 100% !important;
+    min-width: 100% !important;
+    min-height: 50px !important;
+    box-sizing: border-box !important;
+    margin: 5px 0 !important;
     background: #246A52 !important;
     background-color: #246A52 !important;
     border: 1px solid #246A52 !important;
@@ -517,13 +530,17 @@ def show_weekly_detail_table(frame, key, title, order_source, date_column, quant
 
     # Keep ISO year/week internally for progress keys, but show compact week labels.
     original_week_cols = [c for c in frame.columns if re.fullmatch(r"\d{4}-W\d{2}", str(c))]
-    display_names = {w: f"W {int(w[-2:]):02d}" for w in original_week_cols}
+    week_years = {int(w[:4]) for w in original_week_cols}
+    display_names = {
+        w: (f"{w[:4]} W {int(w[-2:]):02d}" if len(week_years) > 1 else f"W {int(w[-2:]):02d}")
+        for w in original_week_cols
+    }
     display_to_original = {display_names[w]: w for w in original_week_cols}
     display_frame = frame.rename(columns=display_names).copy()
 
     # Reuse the same article filtering and sorting controls as Stock & articles.
     filtered = filter_table(display_frame, f"{key}_filters").reset_index(drop=True)
-    week_cols = [c for c in filtered.columns if re.fullmatch(r"W \d{2}", str(c))]
+    week_cols = [c for c in filtered.columns if re.fullmatch(r"(?:\d{4} )?W \d{2}", str(c))]
     editor = filtered[[c for c in filtered.columns if c not in week_cols]].copy()
     ordered_cols = list(editor.columns)
     config = {}
@@ -531,7 +548,8 @@ def show_weekly_detail_table(frame, key, title, order_source, date_column, quant
         original_week = display_to_original[display_week]
         # Use a fixed width for every week/checkbox pair so Streamlit does not
         # auto-size later columns differently based on their contents.
-        raw_values = pd.to_numeric(filtered[display_week], errors="coerce").fillna(0).astype(float)
+        numeric_values = pd.to_numeric(filtered[display_week], errors="coerce")
+        raw_values = numeric_values.to_numpy(dtype="float64", na_value=0.0)
         editor[display_week] = [f"{int(round(value)):^8}" for value in raw_values]
         done_col = f"✓ {display_week}"
         editor[done_col] = [
@@ -559,7 +577,10 @@ def show_weekly_detail_table(frame, key, title, order_source, date_column, quant
             now = bool(row.get(done_col, False))
             if now != was:
                 source_row = filtered.iloc[i]
-                prog[k] = float(source_row[display_week]) if now else 0
+                planned_value = pd.to_numeric(
+                    pd.Series([source_row[display_week]]), errors="coerce"
+                ).fillna(0).iloc[0]
+                prog[k] = float(planned_value) if now else 0
                 changed = True
     if changed:
         save_progress(prog)
@@ -937,7 +958,6 @@ elif page=="production":
         for w in weeks:
             if w not in pivot.columns: pivot[w]=0
         pivot=pivot[["article","description","material_id","seeds_required"]+weeks].rename(columns={"article":T("article"),"description":T("description"),"material_id":"Material ID","seeds_required":"Seeds required"})
-        st.metric(T("required"),german_number(v['production_required'].sum()))
         show_weekly_detail_table(pivot,"prod_weekly",T("production"),v,"production_date","production_required","production",f"{start:%d-%b-%Y} – {end:%d-%b-%Y}")
 
 # ---------- Delivery planning ----------
@@ -961,7 +981,6 @@ elif page=="delivery":
         for w in weeks:
             if w not in pivot.columns: pivot[w]=0
         pivot=pivot[["article","description"]+weeks].rename(columns={"article":T("article"),"description":T("description")})
-        st.metric(T("demand"),german_number(v['qty'].sum()))
         show_weekly_detail_table(pivot,"del_weekly",T("delivery"),v,"delivery_date","qty","delivery",f"{start:%d-%b-%Y} – {end:%d-%b-%Y}")
 
 # ---------- Progress tracker ----------
@@ -1037,12 +1056,69 @@ elif page=="quality":
 # ---------- Exports ----------
 elif page=="exports":
     st.markdown(f"<div class='section-title'>{T('exports_title')}</div><div class='section-sub'>{T('exports_sub')}</div>",unsafe_allow_html=True)
-    quality=pd.DataFrame([{"Issue":T("missing_delivery"),"Rows":int(orders["delivery_date"].isna().sum())},{"Issue":T("missing_duration"),"Rows":int(orders["lead_days"].isna().sum())},{"Issue":T("missing_stock"),"Rows":len(unmatched)}])
-    if "export_workbook_bytes" not in st.session_state:
-        st.session_state["export_workbook_bytes"] = make_excel({
-            "Orders": orders, "Stock": stock, "Production Plan": production_plan,
-            "Delivery Plan": delivery_plan, "Article Summary": article_summary,
-            "Import Quality": quality
-        })
-    st.download_button(T("export_calc"),data=st.session_state["export_workbook_bytes"],file_name=f"EICH_Production_Planning_{year}.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary")
-    st.caption(T("data_note"))
+
+    # Export only records inside the shared date range. Orders and Delivery Plan
+    # are scoped by Delivery Date; Production Plan is scoped by Production Date.
+    export_orders = orders.dropna(subset=["delivery_date"]).copy()
+    export_orders = export_orders[
+        (export_orders["delivery_date"].dt.date >= shared_start)
+        & (export_orders["delivery_date"].dt.date <= shared_end)
+    ].copy()
+
+    export_production_orders = orders.dropna(subset=["production_date"]).copy()
+    export_production_orders = export_production_orders[
+        (export_production_orders["production_date"].dt.date >= shared_start)
+        & (export_production_orders["production_date"].dt.date <= shared_end)
+    ].copy()
+
+    export_production_plan = (
+        export_production_orders.groupby(
+            ["article", "description", "production_year", "production_week"], dropna=False
+        )["production_required"].sum().reset_index(name="production_qty")
+    )
+    export_delivery_plan = (
+        export_orders.groupby(
+            ["article", "description", "delivery_year", "delivery_week"], dropna=False
+        ).agg(
+            delivery_qty=("qty", "sum"),
+            stock_allocated=("stock_allocated", "sum"),
+            production_required=("production_required", "sum"),
+            closing_stock=("remaining_stock_after_order", "last")
+        ).reset_index()
+    )
+
+    export_demand = export_orders.groupby("article", as_index=False).agg(
+        ordered_qty=("qty", "sum"), order_lines=("qty", "size")
+    )
+    export_alloc = export_orders.groupby("article", as_index=False).agg(
+        stock_allocated_total=("stock_allocated", "sum"),
+        production_required_total=("production_required", "sum")
+    )
+    export_article_summary = (
+        export_demand.merge(stock, on="article", how="left")
+        .merge(export_alloc, on="article", how="left")
+    )
+    for col in ["ordered_qty", "order_lines", "stock_allocated_total", "production_required_total"]:
+        export_article_summary[col] = export_article_summary[col].fillna(0)
+    export_article_summary["shortage"] = export_article_summary["production_required_total"]
+
+    export_sheets = {
+        "Orders": export_orders,
+        "Production Plan": export_production_plan,
+        "Delivery Plan": export_delivery_plan,
+        "Article Summary": export_article_summary,
+        # Stock is a current inventory snapshot, not a dated transaction list.
+        "Stock": stock,
+    }
+    export_bytes = make_excel(export_sheets)
+    st.download_button(
+        T("export_calc"), data=export_bytes,
+        file_name=f"EICH_Production_Planning_{shared_start:%Y%m%d}_{shared_end:%Y%m%d}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary"
+    )
+    st.caption(
+        f"Export period: {shared_start:%d/%m/%Y} – {shared_end:%d/%m/%Y}. "
+        "Orders and Delivery Plan use Delivery Date; Production Plan uses Production Date. "
+        "Stock is included as the current inventory snapshot."
+    )
