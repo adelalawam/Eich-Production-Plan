@@ -765,30 +765,29 @@ year = calculated["year"]
 page_map={T("dashboard"):"dashboard",T("production"):"production",T("delivery"):"delivery",T("progress"):"progress",T("stock"):"stock",T("exports"):"exports"}
 page=page_map[page_label]
 
-# ---------- Shared date range (all pages except Exports) ----------
-# Initialise once per session. Tab changes do not reset these values.
+# ---------- Shared date range (all tabs, including Exports) ----------
+# Initialise once per Streamlit session. The same widget keys are used on every
+# tab, so changing either date anywhere updates the shared range everywhere.
+# Values remain unchanged during reruns and tab navigation; a fresh app session
+# starts again with today's date.
 if "shared_from_date" not in st.session_state:
     st.session_state["shared_from_date"] = date.today()
 if "shared_to_date" not in st.session_state:
     st.session_state["shared_to_date"] = date.today()
 
-if page != "exports":
-    st.markdown("<div class='section-title'>Date range</div>", unsafe_allow_html=True)
-    date_col_a, date_col_b = st.columns(2)
-    with date_col_a:
-        shared_start = st.date_input(
-            T("from"), key="shared_from_date", format="DD/MM/YYYY"
-        )
-    with date_col_b:
-        shared_end = st.date_input(
-            T("to"), key="shared_to_date", format="DD/MM/YYYY"
-        )
-    if shared_start > shared_end:
-        st.error(T("date_error"))
-        st.stop()
-else:
-    shared_start = st.session_state["shared_from_date"]
-    shared_end = st.session_state["shared_to_date"]
+st.markdown("<div class='section-title'>Date range</div>", unsafe_allow_html=True)
+date_col_a, date_col_b = st.columns(2)
+with date_col_a:
+    shared_start = st.date_input(
+        T("from"), key="shared_from_date", format="DD/MM/YYYY"
+    )
+with date_col_b:
+    shared_end = st.date_input(
+        T("to"), key="shared_to_date", format="DD/MM/YYYY"
+    )
+if shared_start > shared_end:
+    st.error(T("date_error"))
+    st.stop()
 
 # ---------- Overview ----------
 if page=="dashboard":
