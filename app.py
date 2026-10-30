@@ -202,6 +202,69 @@ st.markdown("""
     accent-color: #A87953 !important;
 }
 
+/* Data Source controls: retain the green/white palette, but make text and
+   button treatments consistent and readable. These rules do not affect nav. */
+[data-testid="stSidebar"] [data-testid="stFileUploader"] section {
+    background: #F7FAF8 !important;
+    border: 1px dashed #91B5A1 !important;
+    border-radius: 12px !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploader"] section,
+[data-testid="stSidebar"] [data-testid="stFileUploader"] section p,
+[data-testid="stSidebar"] [data-testid="stFileUploader"] section span,
+[data-testid="stSidebar"] [data-testid="stFileUploader"] section small,
+[data-testid="stSidebar"] [data-testid="stFileUploader"] section [data-testid="stFileUploaderDropzoneInstructions"] * {
+    color: #20352C !important;
+    opacity: 1 !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploader"] section button {
+    background: #246A52 !important;
+    color: #FFFFFF !important;
+    border: 1px solid #246A52 !important;
+    border-radius: 8px !important;
+    font-weight: 700 !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploader"] section button * {
+    color: #FFFFFF !important;
+}
+/* Import and reload are the two Data Source action buttons. Give both the
+   same green treatment so neither label disappears against the sidebar. */
+[data-testid="stSidebar"] [data-testid="stButton"] > button {
+    background: #246A52 !important;
+    color: #FFFFFF !important;
+    border: 1px solid #246A52 !important;
+    border-radius: 10px !important;
+    font-weight: 700 !important;
+    min-height: 2.55rem !important;
+    box-shadow: 0 2px 5px #071d1526 !important;
+}
+[data-testid="stSidebar"] [data-testid="stButton"] > button * {
+    color: #FFFFFF !important;
+}
+[data-testid="stSidebar"] [data-testid="stButton"] > button:hover:not(:disabled) {
+    background: #1D5944 !important;
+    border-color: #1D5944 !important;
+}
+[data-testid="stSidebar"] [data-testid="stButton"] > button:disabled {
+    background: #56836F !important;
+    border-color: #56836F !important;
+    color: #FFFFFF !important;
+    opacity: .78 !important;
+}
+/* White select field with dark, readable value and menu options. */
+[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"] > div {
+    background: #FFFFFF !important;
+    border-color: #C7D8CE !important;
+    border-radius: 9px !important;
+}
+[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"] *,
+[data-baseweb="popover"] [role="option"] * {
+    color: #20352C !important;
+}
+[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"] svg {
+    fill: #49665A !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
