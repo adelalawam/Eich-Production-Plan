@@ -3,6 +3,7 @@ from pathlib import Path
 from datetime import date, datetime, timezone
 from io import BytesIO
 import pandas as pd
+import numpy as np
 import plotly.express as px
 import streamlit as st
 
@@ -592,7 +593,9 @@ restore_cloud_files()
 
 # ---------- Load saved workbook / import new workbook ----------
 if reload_click:
-    st.session_state.pop("data_ready",None)
+    st.session_state.pop("data_ready", None)
+    st.session_state.pop("calculated_workbook", None)
+    st.session_state.pop("export_workbook_bytes", None)
     st.rerun()
 if "data_ready" not in st.session_state:
     st.session_state["data_ready"]=False
@@ -600,6 +603,7 @@ if "data_ready" not in st.session_state:
         try:
             ro,rs,names=read_workbook(WORKBOOK); po,ps,dm=prepare(ro,rs)
             st.session_state["data"]={"orders":po,"stock":ps,"filename":WORKBOOK.name,"sheets":names,"duration_missing":dm}
+            st.session_state.pop("calculated_workbook", None)
             st.session_state["data_ready"]=True
         except Exception as exc: st.session_state["load_error"]=str(exc)
 if import_click and uploaded is not None:
@@ -608,6 +612,8 @@ if import_click and uploaded is not None:
         uploaded.seek(0); workbook_bytes=uploaded.getvalue(); WORKBOOK.write_bytes(workbook_bytes)
         cloud_saved = cloud_save_state(workbook_bytes=workbook_bytes, filename=uploaded.name)
         st.session_state["data"]={"orders":po,"stock":ps,"filename":uploaded.name,"sheets":names,"duration_missing":dm,"imported_at":datetime.now().strftime("%d-%b-%Y %H:%M") ,"cloud_saved":cloud_saved}
+        st.session_state.pop("calculated_workbook", None)
+        st.session_state.pop("export_workbook_bytes", None)
         st.session_state["data_ready"]=True; st.session_state.pop("load_error",None)
         st.success(f"{T('import_success')}: {len(po):,} order lines · {len(ps):,} stock articles")
         st.rerun()
@@ -618,42 +624,110 @@ if not st.session_state.get("data_ready") or "data" not in st.session_state:
     st.stop()
 
 data=st.session_state["data"]
-orders=data["orders"].copy(); stock=data["stock"].copy()
-if data.get("duration_missing"): st.warning(T("duration_warning"))
+if data.get("duration_missing"):
+    st.warning(T("duration_warning"))
 
-# ---------- Chronological stock allocation: stock covers earliest due orders first ----------
-# Force fresh float columns before row-wise calculations. This avoids dtype-casting
-# crashes (including pandas LossySetitemError) with nullable/integer workbook columns.
-for _col in ("stock_at_start", "stock_allocated", "remaining_stock_after_order", "production_required"):
-    orders[_col] = pd.Series(0.0, index=orders.index, dtype="float64")
-orders["production_required"] = pd.to_numeric(orders["qty"], errors="coerce").fillna(0).clip(lower=0).astype("float64")
-stock_map=stock.set_index("article")["available_stock"].to_dict()
-orders=orders.sort_values(["delivery_date","article"],na_position="last",kind="stable").copy()
-for article,indices in orders[orders["delivery_date"].notna()].groupby("article",sort=False).groups.items():
-    remaining=max(0.0,float(stock_map.get(article,0) or 0))
-    for idx in indices:
-        qty=max(0.0,float(orders.at[idx,"qty"] or 0))
-        allocated=min(remaining,qty)
-        orders.at[idx,"stock_at_start"]=remaining; orders.at[idx,"stock_allocated"]=allocated
-        remaining=max(0.0,remaining-allocated)
-        orders.at[idx,"remaining_stock_after_order"]=remaining
-        orders.at[idx,"production_required"]=max(0.0,qty-allocated)
+# ---------- One-time workbook calculations ----------
+# Expensive calculations are performed once per imported workbook and reused
+# across Streamlit reruns, date changes, and tab navigation.
+if "calculated_workbook" not in st.session_state:
+    orders = data["orders"].copy()
+    stock = data["stock"].copy()
 
-stock_total=stock["available_stock"].sum()
-demand=orders.groupby("article",as_index=False).agg(ordered_qty=("qty","sum"),order_lines=("qty","size"))
-alloc=orders.groupby("article",as_index=False).agg(stock_allocated_total=("stock_allocated","sum"),production_required_total=("production_required","sum"))
-article_summary=stock.merge(demand,on="article",how="left").merge(alloc,on="article",how="left")
-for c in ["ordered_qty","order_lines","stock_allocated_total","production_required_total"]: article_summary[c]=article_summary[c].fillna(0)
-article_summary["shortage"]=article_summary["production_required_total"]
-unmatched=sorted(set(orders["article"])-set(stock["article"]))
-production_plan=orders.dropna(subset=["production_date"]).groupby(["article","description","production_year","production_week"],dropna=False)["production_required"].sum().reset_index(name="production_qty")
-delivery_plan=orders.dropna(subset=["delivery_date"]).groupby(["article","description","delivery_year","delivery_week"],dropna=False).agg(delivery_qty=("qty","sum"),stock_allocated=("stock_allocated","sum"),production_required=("production_required","sum"),closing_stock=("remaining_stock_after_order","last")).reset_index()
+    # FIFO stock allocation, vectorised by article (no Python row-by-row loop).
+    orders["production_required"] = (
+        pd.to_numeric(orders["qty"], errors="coerce").fillna(0).clip(lower=0).astype("float64")
+    )
+    for _col in ("stock_at_start", "stock_allocated", "remaining_stock_after_order"):
+        orders[_col] = 0.0
 
-years=sorted(set([int(y) for y in orders["delivery_year"].dropna() if int(y)>1900]+[int(y) for y in orders["production_year"].dropna() if int(y)>1900]))
-if not years: years=[datetime.now().year]
-default_year=2027 if 2027 in years else years[-1]
-# Use the detected default year internally; the year selector and sidebar descriptions are hidden.
-year = default_year
+    orders = orders.sort_values(
+        ["delivery_date", "article"], na_position="last", kind="stable"
+    ).copy()
+
+    valid_delivery = orders["delivery_date"].notna()
+    alloc_rows = orders.loc[valid_delivery]
+    if not alloc_rows.empty:
+        alloc_qty = pd.to_numeric(alloc_rows["qty"], errors="coerce").fillna(0).clip(lower=0)
+        stock_by_row = (
+            alloc_rows["article"].map(stock.set_index("article")["available_stock"])
+            .fillna(0).clip(lower=0).astype("float64")
+        )
+        cumulative_qty = alloc_qty.groupby(alloc_rows["article"], sort=False).cumsum()
+        previous_qty = cumulative_qty - alloc_qty
+        stock_at_start = (stock_by_row - previous_qty).clip(lower=0)
+        allocated = pd.Series(
+            np.minimum(stock_at_start.to_numpy(), alloc_qty.to_numpy()),
+            index=alloc_rows.index, dtype="float64"
+        )
+        remaining_after = (stock_by_row - cumulative_qty).clip(lower=0)
+
+        orders.loc[valid_delivery, "stock_at_start"] = stock_at_start
+        orders.loc[valid_delivery, "stock_allocated"] = allocated
+        orders.loc[valid_delivery, "remaining_stock_after_order"] = remaining_after
+        orders.loc[valid_delivery, "production_required"] = (alloc_qty - allocated).clip(lower=0)
+
+    stock_total = stock["available_stock"].sum()
+    demand = orders.groupby("article", as_index=False).agg(
+        ordered_qty=("qty", "sum"), order_lines=("qty", "size")
+    )
+    alloc = orders.groupby("article", as_index=False).agg(
+        stock_allocated_total=("stock_allocated", "sum"),
+        production_required_total=("production_required", "sum")
+    )
+    article_summary = stock.merge(demand, on="article", how="left").merge(alloc, on="article", how="left")
+    for c in ["ordered_qty", "order_lines", "stock_allocated_total", "production_required_total"]:
+        article_summary[c] = article_summary[c].fillna(0)
+    article_summary["shortage"] = article_summary["production_required_total"]
+    unmatched = sorted(set(orders["article"]) - set(stock["article"]))
+
+    production_plan = (
+        orders.dropna(subset=["production_date"])
+        .groupby(["article", "description", "production_year", "production_week"], dropna=False)["production_required"]
+        .sum().reset_index(name="production_qty")
+    )
+    delivery_plan = (
+        orders.dropna(subset=["delivery_date"])
+        .groupby(["article", "description", "delivery_year", "delivery_week"], dropna=False)
+        .agg(
+            delivery_qty=("qty", "sum"),
+            stock_allocated=("stock_allocated", "sum"),
+            production_required=("production_required", "sum"),
+            closing_stock=("remaining_stock_after_order", "last")
+        ).reset_index()
+    )
+
+    years = sorted(set(
+        [int(y) for y in orders["delivery_year"].dropna() if int(y) > 1900]
+        + [int(y) for y in orders["production_year"].dropna() if int(y) > 1900]
+    ))
+    if not years:
+        years = [datetime.now().year]
+    default_year = 2027 if 2027 in years else years[-1]
+    year = default_year
+
+    st.session_state["calculated_workbook"] = {
+        "orders": orders,
+        "stock": stock,
+        "stock_total": stock_total,
+        "article_summary": article_summary,
+        "unmatched": unmatched,
+        "production_plan": production_plan,
+        "delivery_plan": delivery_plan,
+        "years": years,
+        "year": year,
+    }
+
+calculated = st.session_state["calculated_workbook"]
+orders = calculated["orders"]
+stock = calculated["stock"]
+stock_total = calculated["stock_total"]
+article_summary = calculated["article_summary"]
+unmatched = calculated["unmatched"]
+production_plan = calculated["production_plan"]
+delivery_plan = calculated["delivery_plan"]
+years = calculated["years"]
+year = calculated["year"]
 
 page_map={T("dashboard"):"dashboard",T("production"):"production",T("delivery"):"delivery",T("progress"):"progress",T("stock"):"stock",T("exports"):"exports"}
 page=page_map[page_label]
@@ -873,6 +947,11 @@ elif page=="quality":
 elif page=="exports":
     st.markdown(f"<div class='section-title'>{T('exports_title')}</div><div class='section-sub'>{T('exports_sub')}</div>",unsafe_allow_html=True)
     quality=pd.DataFrame([{"Issue":T("missing_delivery"),"Rows":int(orders["delivery_date"].isna().sum())},{"Issue":T("missing_duration"),"Rows":int(orders["lead_days"].isna().sum())},{"Issue":T("missing_stock"),"Rows":len(unmatched)}])
-    output=make_excel({"Orders":orders,"Stock":stock,"Production Plan":production_plan,"Delivery Plan":delivery_plan,"Article Summary":article_summary,"Import Quality":quality})
-    st.download_button(T("export_calc"),data=output,file_name=f"EICH_Production_Planning_{year}.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary")
+    if "export_workbook_bytes" not in st.session_state:
+        st.session_state["export_workbook_bytes"] = make_excel({
+            "Orders": orders, "Stock": stock, "Production Plan": production_plan,
+            "Delivery Plan": delivery_plan, "Article Summary": article_summary,
+            "Import Quality": quality
+        })
+    st.download_button(T("export_calc"),data=st.session_state["export_workbook_bytes"],file_name=f"EICH_Production_Planning_{year}.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary")
     st.caption(T("data_note"))
