@@ -167,6 +167,74 @@ st.markdown("""
 [data-testid="stSidebar"] button:disabled{opacity:.72!important;color:#e8f1ed!important}
 [data-testid="stSidebar"] [data-testid="stFileUploaderDropzoneInstructions"] *{color:#17392d!important}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}
+
+/* EICH brown sidebar navigation theme */
+[data-testid="stSidebar"]{
+    background:linear-gradient(180deg,#38251D 0%,#513629 55%,#694936 100%)!important;
+    border-right:1px solid #80614C!important;
+}
+[data-testid="stSidebar"] *{color:#F8F3EE}
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"]{color:#E0CDBD!important}
+[data-testid="stSidebar"] .sidebar-section-label{
+    background:#76523C!important;
+    color:#FFFFFF!important;
+    border:1px solid #98745B!important;
+    box-shadow:0 4px 0 #302019,0 8px 18px #21140F55!important;
+}
+[data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] label{
+    background:#51392D!important;
+    border:1px solid #765541!important;
+    color:#FFFFFF!important;
+    box-shadow:0 3px 0 #302019!important;
+}
+[data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] label:hover{
+    background:#76523C!important;
+    border-color:#A98264!important;
+    transform:translateY(-1px);
+}
+[data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] label:has(input:checked){
+    background:#E9D9C9!important;
+    border-color:#C6A88C!important;
+    box-shadow:0 3px 0 #B18A6B!important;
+}
+[data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] label:has(input:checked) *{
+    color:#38251D!important;
+}
+[data-testid="stSidebar"] [data-testid="stRadio"] input[type="radio"]{
+    accent-color:#A87953!important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploader"] section{
+    background:#F7F0E9!important;
+    border:2px dashed #B99A7E!important;
+    border-radius:12px;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploader"] section *,
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzoneInstructions"] *{
+    color:#38251D!important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploader"] button{
+    background:#8B6245!important;
+    color:#FFFFFF!important;
+    border:0!important;
+}
+[data-testid="stSidebar"] [data-testid="stSelectbox"] label{
+    color:#F8F3EE!important;
+}
+[data-testid="stSidebar"] [data-testid="stSelectbox"] [data-baseweb="select"] *{
+    color:#38251D!important;
+}
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p{
+    color:#F8F3EE!important;
+    opacity:1!important;
+}
+[data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) *,
+[data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked){
+    color:#38251D!important;
+}
+[data-testid="stSidebar"] hr{border-color:#B99A7E66!important}
+
 </style>
 """, unsafe_allow_html=True)
 
