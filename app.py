@@ -498,35 +498,53 @@ def show_table(frame,key,title,subtitle=""):
     return filtered
 
 def show_weekly_detail_table(frame, key, title, order_source, date_column, quantity_column, detail_kind, subtitle=""):
-    """Weekly matrix with a persistent completion checkbox immediately beside each week quantity."""
+    """Filter/sort weekly article rows while keeping completion checkboxes beside each week."""
     st.caption("Each week shows the planned quantity and a completion checkbox beside it. Tick the box when complete.")
     prog = load_progress()
     article_col = T("article")
-    week_cols = [c for c in frame.columns if re.fullmatch(r"\d{4}-W\d{2}", str(c))]
-    edited = frame.copy()
-    # Interleave quantity and completion fields so the checkbox stays directly beside its week.
-    ordered_cols = [c for c in frame.columns if c not in week_cols]
-    editor = frame[ordered_cols].copy()
+
+    # Keep ISO year/week internally for progress keys, but show compact week labels.
+    original_week_cols = [c for c in frame.columns if re.fullmatch(r"\d{4}-W\d{2}", str(c))]
+    display_names = {w: f"W {int(w[-2:]):02d}" for w in original_week_cols}
+    display_to_original = {display_names[w]: w for w in original_week_cols}
+    display_frame = frame.rename(columns=display_names).copy()
+
+    # Reuse the same article filtering and sorting controls as Stock & articles.
+    filtered = filter_table(display_frame, f"{key}_filters").reset_index(drop=True)
+    week_cols = [c for c in filtered.columns if re.fullmatch(r"W \d{2}", str(c))]
+    editor = filtered[[c for c in filtered.columns if c not in week_cols]].copy()
+    ordered_cols = list(editor.columns)
     config = {}
-    for w in week_cols:
-        editor[w] = pd.to_numeric(frame[w], errors="coerce").fillna(0).astype(float)
-        done_col = f"✓ {w}"
-        editor[done_col] = [bool(prog.get(pkey(detail_kind, int(w[:4]), row.get(article_col, ""), int(w[-2:])), 0)) for _, row in frame.iterrows()]
-        ordered_cols.extend([w, done_col])
-        config[w] = st.column_config.NumberColumn(w, format="%.0f", disabled=True, width="small")
-        config[done_col] = st.column_config.CheckboxColumn("✓", help=f"Mark {w} complete", default=False, width="small")
+    for display_week in week_cols:
+        original_week = display_to_original[display_week]
+        editor[display_week] = pd.to_numeric(filtered[display_week], errors="coerce").fillna(0).astype(float)
+        done_col = f"✓ {display_week}"
+        editor[done_col] = [
+            bool(prog.get(pkey(detail_kind, int(original_week[:4]), row.get(article_col, ""), int(original_week[-2:])), 0))
+            for _, row in filtered.iterrows()
+        ]
+        ordered_cols.extend([display_week, done_col])
+        config[display_week] = st.column_config.NumberColumn(display_week, format="%.0f", disabled=True, width="small")
+        config[done_col] = st.column_config.CheckboxColumn("✓", help=f"Mark {display_week} complete", default=False, width="small")
+
     editor = editor[ordered_cols]
-    edited = st.data_editor(editor, key=f"{key}_editor", use_container_width=True, hide_index=True,
-                            height=470, column_config=config, disabled=[c for c in ordered_cols if c not in week_cols and not c.startswith("✓ ")])
+    edited = st.data_editor(
+        editor, key=f"{key}_editor_v2", use_container_width=True, hide_index=True,
+        height=470, column_config=config,
+        disabled=[c for c in ordered_cols if c not in week_cols and not c.startswith("✓ ")]
+    )
     changed = False
     for i, row in edited.iterrows():
         article = str(row.get(article_col, ""))
-        for w in week_cols:
-            done_col = f"✓ {w}"
-            k = pkey(detail_kind, int(w[:4]), article, int(w[-2:]))
-            was = bool(prog.get(k, 0)); now = bool(row.get(done_col, False))
+        for display_week in week_cols:
+            original_week = display_to_original[display_week]
+            done_col = f"✓ {display_week}"
+            k = pkey(detail_kind, int(original_week[:4]), article, int(original_week[-2:]))
+            was = bool(prog.get(k, 0))
+            now = bool(row.get(done_col, False))
             if now != was:
-                prog[k] = float(frame.iloc[i][w]) if now else 0
+                source_row = filtered.iloc[i]
+                prog[k] = float(source_row[display_week]) if now else 0
                 changed = True
     if changed:
         save_progress(prog)
