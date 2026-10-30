@@ -844,6 +844,30 @@ if page=="dashboard":
         fig.update_layout(margin=dict(l=10,r=10,t=55,b=10),paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",font_color="#193d32",yaxis_title="Units",xaxis_title="Month")
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "displaylogo": False, "responsive": True})
 
+        # Delivery demand: all ISO weeks belonging to the selected calendar year.
+        # Use Delivery Date (not Production Date) and keep zero-demand weeks visible.
+        weeks_in_year = date(chart_year, 12, 28).isocalendar().week
+        delivery_week_labels = [f"W {week:02d}" for week in range(1, weeks_in_year + 1)]
+        delivery_weekly_source = orders.dropna(subset=["delivery_date"]).copy()
+        if not delivery_weekly_source.empty:
+            delivery_iso = delivery_weekly_source["delivery_date"].dt.isocalendar()
+            delivery_weekly_source["iso_year"] = delivery_iso.year.astype(int)
+            delivery_weekly_source["iso_week"] = delivery_iso.week.astype(int)
+            delivery_weekly_source = delivery_weekly_source[delivery_weekly_source["iso_year"] == chart_year]
+            delivery_weekly = (delivery_weekly_source.groupby("iso_week")["qty"].sum()
+                               .reindex(range(1, weeks_in_year + 1), fill_value=0)
+                               .rename_axis("iso_week").reset_index())
+        else:
+            delivery_weekly = pd.DataFrame({"iso_week": range(1, weeks_in_year + 1), "qty": 0})
+        delivery_weekly["week_label"] = delivery_weekly["iso_week"].map(lambda week: f"W {int(week):02d}")
+        st.subheader("Delivery demand by week")
+        fig=px.area(delivery_weekly,x="week_label",y="qty",template="plotly_white",markers=True,
+                    category_orders={"week_label": delivery_week_labels})
+        fig.update_traces(line_color="#17634d",fillcolor="rgba(35,118,94,0.18)",
+                          hovertemplate="%{x}<br>Units %{y:,.0f}<extra></extra>")
+        fig.update_layout(height=390,margin=dict(l=8,r=10,t=12,b=65),paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",font_color="#193d32",xaxis_title="Week",yaxis_title="Units",xaxis=dict(type="category",tickmode="array",tickvals=delivery_week_labels,ticktext=delivery_week_labels,tickangle=-45,automargin=True,tickfont=dict(size=9)),yaxis=dict(automargin=True),showlegend=False)
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "displaylogo": False, "responsive": True})
+
         # Production workload: all ISO weeks belonging to the selected year.
         # Reindexing keeps zero-workload weeks visible.
         weeks_in_year = date(chart_year, 12, 28).isocalendar().week
