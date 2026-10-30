@@ -808,3 +808,4 @@ elif page=="exports":
     output=make_excel({"Orders":orders,"Stock":stock,"Production Plan":production_plan,"Delivery Plan":delivery_plan,"Article Summary":article_summary,"Import Quality":quality})
     st.download_button(T("export_calc"),data=output,file_name=f"EICH_Production_Planning_{year}.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary")
     st.caption(T("data_note"))
+    
