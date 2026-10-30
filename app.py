@@ -168,38 +168,36 @@ st.markdown("""
 [data-testid="stSidebar"] [data-testid="stFileUploaderDropzoneInstructions"] *{color:#17392d!important}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}
 
-/* Brown styling ONLY for the seven workspace navigation items. */
+/* Navigation buttons use the same green as the Reload last imported workbook button. */
 [data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label {
-    background: #51392D !important;
-    background-color: #51392D !important;
-    border: 1px solid #765541 !important;
+    background: #246A52 !important;
+    background-color: #246A52 !important;
+    border: 1px solid #246A52 !important;
     color: #FFFFFF !important;
-    box-shadow: 0 3px 0 #302019 !important;
+    box-shadow: 0 3px 0 #174936 !important;
     border-radius: 10px !important;
     transition: transform .15s ease, background .15s ease, border-color .15s ease;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label:hover {
-    background: #76523C !important;
-    background-color: #76523C !important;
-    border-color: #A98264 !important;
+    background: #1D5944 !important;
+    background-color: #1D5944 !important;
+    border-color: #1D5944 !important;
     transform: translateY(-1px);
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label:has(input:checked),
 [data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label:has([aria-checked="true"]) {
-    background: #E9D9C9 !important;
-    background-color: #E9D9C9 !important;
-    border-color: #C6A88C !important;
-    box-shadow: 0 3px 0 #B18A6B !important;
+    background: #246A52 !important;
+    background-color: #246A52 !important;
+    border-color: #246A52 !important;
+    box-shadow: 0 3px 0 #174936 !important;
 }
 [data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) *,
 [data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label:has([aria-checked="true"]) * {
-    color: #38251D !important;
-}
-[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label:not(:has(input:checked)):not(:has([aria-checked="true"])) * {
     color: #FFFFFF !important;
 }
+[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label *,
 [data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] input[type="radio"] {
-    accent-color: #A87953 !important;
+    accent-color: #FFFFFF !important;
 }
 
 /* Data Source controls: retain the green/white palette, but make text and
@@ -274,16 +272,12 @@ with st.sidebar:
     st.caption("PRODUCTION PLANNING")
     st.selectbox("Language / Sprache", ["English","Deutsch"], key="language")
     st.divider()
-    # Workspace navigation comes first; workbook controls are placed below it.
-    st.markdown(f"<div class='sidebar-section-label'>{T('nav')}</div>", unsafe_allow_html=True)
     nav = [T("dashboard"),T("production"),T("delivery"),T("progress"),T("stock"),T("quality"),T("exports")]
     page_label = st.radio("Navigation", nav, label_visibility="collapsed", key="nav")
     st.divider()
-    st.markdown(f"<div class='sidebar-section-label'>📘 {T('data_source')}</div>", unsafe_allow_html=True)
     uploaded = st.file_uploader(T("upload"), type=["xlsx"], key="xlsx_upload")
     import_click = st.button(T("import"), type="primary", use_container_width=True, disabled=uploaded is None)
     reload_click = st.button(T("reload"), use_container_width=True)
-    st.caption(T("data_note"))
 
 st.markdown(f"""<div class="hero"><div class="eyebrow">EICH · OPERATIONS</div>
 <div class="title">🌱 Production Planning</div><div class="subtitle">{T('tagline')}</div></div>""", unsafe_allow_html=True)
@@ -649,15 +643,8 @@ delivery_plan=orders.dropna(subset=["delivery_date"]).groupby(["article","descri
 years=sorted(set([int(y) for y in orders["delivery_year"].dropna() if int(y)>1900]+[int(y) for y in orders["production_year"].dropna() if int(y)>1900]))
 if not years: years=[datetime.now().year]
 default_year=2027 if 2027 in years else years[-1]
-with st.sidebar:
-    year=st.selectbox(T("year"),years,index=years.index(default_year),key="plan_year")
-    st.caption(f"{T('active')}: {data['filename']}")
-    if data.get("imported_at"):
-        st.caption(f"Last imported: {data['imported_at']}")
-    elif WORKBOOK.exists():
-        st.caption(f"Last saved locally: {datetime.fromtimestamp(WORKBOOK.stat().st_mtime).strftime('%d-%b-%Y %H:%M')}")
-    if not cloud_client():
-        st.caption("Persistent cloud storage is not configured; local file storage may not survive a hosted-app restart.")
+# Use the detected default year internally; the year selector and sidebar descriptions are hidden.
+year = default_year
 
 page_map={T("dashboard"):"dashboard",T("production"):"production",T("delivery"):"delivery",T("progress"):"progress",T("stock"):"stock",T("quality"):"quality",T("exports"):"exports"}
 page=page_map[page_label]
