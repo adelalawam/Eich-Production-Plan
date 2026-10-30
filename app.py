@@ -5,6 +5,7 @@ from io import BytesIO
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 st.set_page_config(page_title="EICH | Production Planning", page_icon="🌱", layout="wide", initial_sidebar_state="expanded")
@@ -796,20 +797,147 @@ if page=="dashboard":
     st.divider()
     st.markdown("<div class='dashboard-chart-stack'>", unsafe_allow_html=True)
     with st.container():
-        monthly=yorders.dropna(subset=["delivery_date"]).assign(month=lambda x:x["delivery_date"].dt.to_period("M").astype(str)).groupby("month",as_index=False)["qty"].sum()
-        if not monthly.empty:
-            fig=px.area(monthly,x="month",y="qty",title=T("trend"),template="plotly_white",markers=True)
-            fig.update_traces(line_color="#17634d",fillcolor="rgba(35,118,94,0.18)")
-            fig.update_layout(margin=dict(l=10,r=10,t=55,b=10),paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",font_color="#193d32",yaxis_title="Units",xaxis_title="Month")
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "displaylogo": False, "responsive": True})
-        weekly=yprod.dropna(subset=["production_date"]).assign(week_start=lambda x:x["production_date"].dt.to_period("W").dt.start_time).groupby("week_start",as_index=False)["production_required"].sum().tail(20)
-        if not weekly.empty:
-            weekly["week_label"] = weekly["week_start"].apply(lambda d: f"{d.isocalendar().year}-W{d.isocalendar().week:02d}")
-            st.subheader("Production workload by week")
-            fig=px.bar(weekly,x="week_label",y="production_required",template="plotly_white")
-            fig.update_traces(marker_color="#2b8068", hovertemplate="Week %{x}<br>Units %{y:,.0f}<extra></extra>")
-            fig.update_layout(height=360,margin=dict(l=8,r=8,t=12,b=35),paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",font_color="#193d32",xaxis_title="Week",yaxis_title="Units",xaxis=dict(tickangle=0, automargin=True, tickfont=dict(size=10)),yaxis=dict(automargin=True),showlegend=False)
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "displaylogo": False, "responsive": True})
+        # Charts use the actual current calendar year, independently of the
+        # shared From/To date controls and the planning year selector.
+        chart_year = date.today().year
+        year_start = pd.Timestamp(chart_year, 1, 1)
+        year_end = pd.Timestamp(chart_year, 12, 31, 23, 59, 59)
+
+        # Delivery demand: always show all 12 months of the current year.
+        delivery_year = orders.dropna(subset=["delivery_date"])
+        delivery_year = delivery_year[
+            (delivery_year["delivery_date"] >= year_start)
+            & (delivery_year["delivery_date"] <= year_end)
+        ]
+        monthly_values = (
+            delivery_year.assign(month=delivery_year["delivery_date"].dt.month)
+            .groupby("month")["qty"].sum()
+        )
+        monthly = pd.DataFrame({
+            "month_number": range(1, 13),
+            "qty": [float(monthly_values.get(m, 0)) for m in range(1, 13)]
+        })
+        monthly["month"] = monthly["month_number"].apply(
+            lambda m: pd.Timestamp(chart_year, m, 1).strftime("%b")
+        )
+        fig = px.area(
+            monthly, x="month", y="qty", title=f"{T('trend')} · {chart_year}",
+            template="plotly_white", markers=True,
+            category_orders={"month": monthly["month"].tolist()}
+        )
+        fig.update_traces(
+            line=dict(color="#17634d", width=3),
+            fillcolor="rgba(35,118,94,0.18)",
+            marker=dict(color="#17634d", size=7),
+            hovertemplate="%{x}<br>Units %{y:,.0f}<extra></extra>"
+        )
+        fig.update_layout(
+            height=330, margin=dict(l=10,r=10,t=55,b=10),
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            font_color="#193d32", yaxis_title="Units", xaxis_title="Month",
+            hovermode="x unified"
+        )
+        fig.update_xaxes(showgrid=False, fixedrange=True)
+        fig.update_yaxes(rangemode="tozero", gridcolor="rgba(25,61,50,0.10)")
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "displaylogo": False, "responsive": True})
+
+        # Production workload: every calendar week intersecting the current year.
+        production_year = orders.dropna(subset=["production_date"])
+        production_year = production_year[
+            (production_year["production_date"] >= year_start)
+            & (production_year["production_date"] <= year_end)
+        ]
+        production_year = production_year.copy()
+        production_year["week_start"] = (
+            production_year["production_date"].dt.normalize()
+            - pd.to_timedelta(production_year["production_date"].dt.weekday, unit="D")
+        )
+        weekly_values = production_year.groupby("week_start")["production_required"].sum()
+        first_week = year_start - pd.Timedelta(days=year_start.weekday())
+        last_week = year_end.normalize() - pd.Timedelta(days=year_end.weekday())
+        week_starts = pd.date_range(first_week, last_week, freq="7D")
+        weekly = pd.DataFrame({"week_start": week_starts})
+        weekly["production_required"] = [
+            float(weekly_values.get(w, 0)) for w in week_starts
+        ]
+        weekly["week_label"] = weekly["week_start"].apply(
+            lambda d: f"{d.isocalendar().year}-W{d.isocalendar().week:02d}"
+        )
+
+        st.subheader(f"Production workload by week · {chart_year}")
+        # Rounded-top 3D columns, built as shallow extruded meshes.
+        fig = go.Figure()
+        max_value = max(weekly["production_required"].max(), 1)
+        for idx, row in weekly.iterrows():
+            value = float(row["production_required"])
+            if value <= 0:
+                continue
+            x0, x1 = idx - 0.34, idx + 0.34
+            depth = 0.48
+            radius = min(0.12, (x1 - x0) * 0.22, value / max_value * 0.08)
+            points = [(x0, 0.0), (x1, 0.0), (x1, value - radius)]
+            # Rounded upper-right corner.
+            for step in range(1, 7):
+                angle = (step / 6) * (np.pi / 2)
+                points.append((x1 - radius + radius*np.cos(angle),
+                               value - radius + radius*np.sin(angle)))
+            # Rounded upper-left corner.
+            for step in range(0, 7):
+                angle = np.pi/2 + (step / 6) * (np.pi / 2)
+                points.append((x0 + radius + radius*np.cos(angle),
+                               value - radius + radius*np.sin(angle)))
+            points.append((x0, 0.0))
+            n = len(points)
+            xs = [p[0] for p in points] + [p[0] for p in points] + [(x0+x1)/2]
+            zs = [p[1] for p in points] + [p[1] for p in points] + [value/2]
+            ys = [0.0]*n + [depth]*n + [depth/2]
+            ii, jj, kk, facecolors = [], [], [], []
+            center = 2*n
+            for j in range(n):
+                nxt = (j+1) % n
+                ii.append(center); jj.append(j); kk.append(nxt)
+                facecolors.append("#269675")
+                ii.append(center); jj.append(n+nxt); kk.append(n+j)
+                facecolors.append("#17634d")
+                ii.extend([j, nxt]); jj.extend([nxt, n+nxt]); kk.extend([n+j, n+j])
+                facecolors.extend(["#12513f", "#12513f"])
+            fig.add_trace(go.Mesh3d(
+                x=xs, y=ys, z=zs, i=ii, j=jj, k=kk,
+                facecolor=facecolors, flatshading=True,
+                name=row["week_label"], showlegend=False,
+                hovertemplate=f"{row['week_label']}<br>Units: {value:,.0f}<extra></extra>"
+            ))
+        tickvals = list(range(0, len(weekly), 2))
+        ticktext = [weekly.iloc[i]["week_label"] for i in tickvals]
+        fig.update_layout(
+            height=430,
+            margin=dict(l=0,r=0,t=12,b=8),
+            paper_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#193d32", size=11),
+            showlegend=False,
+            scene=dict(
+                bgcolor="rgba(0,0,0,0)",
+                aspectmode="manual",
+                aspectratio=dict(x=2.8, y=0.55, z=1.15),
+                camera=dict(eye=dict(x=1.65, y=-2.15, z=1.35)),
+                xaxis=dict(
+                    title="Calendar week", tickmode="array",
+                    tickvals=tickvals, ticktext=ticktext,
+                    showbackground=False, showgrid=False,
+                    zeroline=False, tickfont=dict(size=9)
+                ),
+                yaxis=dict(
+                    title="", showticklabels=False, showbackground=False,
+                    showgrid=False, zeroline=False, showspikes=False
+                ),
+                zaxis=dict(
+                    title="Units", rangemode="tozero",
+                    showbackground=False, gridcolor="rgba(25,61,50,0.12)",
+                    zeroline=False
+                )
+            )
+        )
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "displaylogo": False, "responsive": True})
     st.markdown("</div>", unsafe_allow_html=True)
     st.subheader("Operational watchlist")
     watch=[]
