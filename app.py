@@ -773,18 +773,18 @@ if page=="dashboard":
     req=float(yprod["production_required"].sum()); ordered=float(yorders["qty"].sum()); outstanding_prod=max(0,req-produced_total); outstanding_del=max(0,ordered-delivered_total)
     st.markdown("<div class='eyebrow'>EXECUTIVE OPERATIONS SNAPSHOT</div>",unsafe_allow_html=True)
     metrics=[
-        (T("ordered"),ordered,"#173D63","#D7E9FF"),
-        (T("required"),req,"#163F35","#A7E3C5"),
-        ("Seeds required",float(yprod["seeds_required"].sum()),"#60461A","#FFE0A0"),
-        ("Open production",outstanding_prod,"#4B315F","#E4C7FF")
+        (T("ordered"),ordered,"#173D63","#D7E9FF","Total customer demand in the selected date range"),
+        (T("required"),req,"#163F35","#A7E3C5","Units that need to be produced after stock allocation"),
+        ("Seeds required",float(yprod["seeds_required"].sum()),"#60461A","#FFE0A0","Estimated seeds needed for the planned production"),
+        ("Open production",outstanding_prod,"#4B315F","#E4C7FF","Production quantity not yet marked as completed")
     ]
     metric_cards = []
-    for label,value,bg,accent in metrics:
+    for label,value,bg,accent,description in metrics:
         metric_cards.append(
             f"<div class='exec-card' style='background:{bg};color:#fff'>"
             f"<div class='exec-card-label' style='color:{accent}'>{label}</div>"
             f"<div class='exec-card-value' style='color:#fff'>{german_number(value)}</div>"
-            f"<div class='exec-card-foot' style='color:{accent}'>Planning year {year}</div>"
+            f"<div class='exec-card-foot' style='color:{accent}'>{description}</div>"
             f"</div>"
         )
     st.markdown("<div class='exec-card-grid'>" + "".join(metric_cards) + "</div>",unsafe_allow_html=True)
@@ -865,76 +865,49 @@ if page=="dashboard":
         )
 
         st.subheader(f"Production workload by week · {chart_year}")
-        # Rounded-top 3D columns, built as shallow extruded meshes.
+        # Professional 2D weekly columns: clear axes, consistent spacing,
+        # restrained green palette and readable fortnightly labels.
         fig = go.Figure()
-        max_value = max(weekly["production_required"].max(), 1)
-        for idx, row in weekly.iterrows():
-            value = float(row["production_required"])
-            if value <= 0:
-                continue
-            x0, x1 = idx - 0.34, idx + 0.34
-            depth = 0.48
-            radius = min(0.12, (x1 - x0) * 0.22, value / max_value * 0.08)
-            points = [(x0, 0.0), (x1, 0.0), (x1, value - radius)]
-            # Rounded upper-right corner.
-            for step in range(1, 7):
-                angle = (step / 6) * (np.pi / 2)
-                points.append((x1 - radius + radius*np.cos(angle),
-                               value - radius + radius*np.sin(angle)))
-            # Rounded upper-left corner.
-            for step in range(0, 7):
-                angle = np.pi/2 + (step / 6) * (np.pi / 2)
-                points.append((x0 + radius + radius*np.cos(angle),
-                               value - radius + radius*np.sin(angle)))
-            points.append((x0, 0.0))
-            n = len(points)
-            xs = [p[0] for p in points] + [p[0] for p in points] + [(x0+x1)/2]
-            zs = [p[1] for p in points] + [p[1] for p in points] + [value/2]
-            ys = [0.0]*n + [depth]*n + [depth/2]
-            ii, jj, kk, facecolors = [], [], [], []
-            center = 2*n
-            for j in range(n):
-                nxt = (j+1) % n
-                ii.append(center); jj.append(j); kk.append(nxt)
-                facecolors.append("#269675")
-                ii.append(center); jj.append(n+nxt); kk.append(n+j)
-                facecolors.append("#17634d")
-                ii.extend([j, nxt]); jj.extend([nxt, n+nxt]); kk.extend([n+j, n+j])
-                facecolors.extend(["#12513f", "#12513f"])
-            fig.add_trace(go.Mesh3d(
-                x=xs, y=ys, z=zs, i=ii, j=jj, k=kk,
-                facecolor=facecolors, flatshading=True,
-                name=row["week_label"], showlegend=False,
-                hovertemplate=f"{row['week_label']}<br>Units: {value:,.0f}<extra></extra>"
-            ))
-        tickvals = list(range(0, len(weekly), 2))
-        ticktext = [weekly.iloc[i]["week_label"] for i in tickvals]
+        fig.add_trace(go.Bar(
+            x=weekly["week_label"],
+            y=weekly["production_required"],
+            marker=dict(
+                color="#23866B",
+                line=dict(color="#17634D", width=0.6)
+            ),
+            opacity=0.96,
+            hovertemplate="<b>%{x}</b><br>Production required: %{y:,.0f} units<extra></extra>",
+            name="Production required"
+        ))
+        tickvals = weekly["week_label"].iloc[::2].tolist()
         fig.update_layout(
-            height=430,
-            margin=dict(l=0,r=0,t=12,b=8),
+            height=370,
+            margin=dict(l=12,r=16,t=18,b=58),
             paper_bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#193d32", size=11),
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#193D32", size=11),
             showlegend=False,
-            scene=dict(
-                bgcolor="rgba(0,0,0,0)",
-                aspectmode="manual",
-                aspectratio=dict(x=2.8, y=0.55, z=1.15),
-                camera=dict(eye=dict(x=1.65, y=-2.15, z=1.35)),
-                xaxis=dict(
-                    title="Calendar week", tickmode="array",
-                    tickvals=tickvals, ticktext=ticktext,
-                    showbackground=False, showgrid=False,
-                    zeroline=False, tickfont=dict(size=9)
-                ),
-                yaxis=dict(
-                    title="", showticklabels=False, showbackground=False,
-                    showgrid=False, zeroline=False, showspikes=False
-                ),
-                zaxis=dict(
-                    title="Units", rangemode="tozero",
-                    showbackground=False, gridcolor="rgba(25,61,50,0.12)",
-                    zeroline=False
-                )
+            bargap=0.28,
+            hovermode="x",
+            xaxis=dict(
+                title="Calendar week",
+                type="category",
+                tickmode="array",
+                tickvals=tickvals,
+                tickangle=0,
+                tickfont=dict(size=9),
+                showgrid=False,
+                zeroline=False,
+                linecolor="rgba(25,61,50,0.18)",
+                automargin=True
+            ),
+            yaxis=dict(
+                title="Units",
+                rangemode="tozero",
+                gridcolor="rgba(25,61,50,0.10)",
+                zeroline=False,
+                automargin=True,
+                tickformat=",.0f"
             )
         )
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "displaylogo": False, "responsive": True})
