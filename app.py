@@ -797,13 +797,13 @@ if page=="dashboard":
     st.divider()
     st.markdown("<div class='dashboard-chart-stack'>", unsafe_allow_html=True)
     with st.container():
-        # Charts use the actual current calendar year, independently of the
-        # shared From/To date controls and the planning year selector.
-        chart_year = date.today().year
+        # Charts show the full calendar year selected by the shared
+        # From date. Changing the shared date range updates both charts.
+        chart_year = shared_start.year
         year_start = pd.Timestamp(chart_year, 1, 1)
         year_end = pd.Timestamp(chart_year, 12, 31, 23, 59, 59)
 
-        # Delivery demand: always show all 12 months of the current year.
+        # Delivery demand: show all 12 months of the selected calendar year.
         delivery_year = orders.dropna(subset=["delivery_date"])
         delivery_year = delivery_year[
             (delivery_year["delivery_date"] >= year_start)
@@ -841,7 +841,7 @@ if page=="dashboard":
         fig.update_yaxes(rangemode="tozero", gridcolor="rgba(25,61,50,0.10)")
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "displaylogo": False, "responsive": True})
 
-        # Production workload: every calendar week intersecting the current year.
+        # Production workload: every calendar week intersecting the selected year.
         production_year = orders.dropna(subset=["production_date"])
         production_year = production_year[
             (production_year["production_date"] >= year_start)
@@ -861,7 +861,7 @@ if page=="dashboard":
             float(weekly_values.get(w, 0)) for w in week_starts
         ]
         weekly["week_label"] = weekly["week_start"].apply(
-            lambda d: f"{d.isocalendar().year}-W{d.isocalendar().week:02d}"
+            lambda d: f"W {d.isocalendar().week:02d}"
         )
 
         st.subheader(f"Production workload by week · {chart_year}")
