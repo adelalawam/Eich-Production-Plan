@@ -826,20 +826,29 @@ if page=="dashboard":
     st.divider()
     st.markdown("<div class='dashboard-chart-stack'>", unsafe_allow_html=True)
     with st.container():
-        monthly=yorders.dropna(subset=["delivery_date"]).assign(month=lambda x:x["delivery_date"].dt.to_period("M").astype(str)).groupby("month",as_index=False)["qty"].sum()
-        if not monthly.empty:
-            fig=px.area(monthly,x="month",y="qty",title=T("trend"),template="plotly_white",markers=True)
-            fig.update_traces(line_color="#17634d",fillcolor="rgba(35,118,94,0.18)")
-            fig.update_layout(margin=dict(l=10,r=10,t=55,b=10),paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",font_color="#193d32",yaxis_title="Units",xaxis_title="Month")
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "displaylogo": False, "responsive": True})
-        # Build a complete ISO-week axis for the selected calendar year.
-        # ISO week 53 from the previous ISO year (for example 2026-W53 on 1-3 Jan 2027)
-        # is deliberately excluded from the 2027 chart. Reindexing also keeps zero-demand
-        # weeks visible, instead of Plotly silently skipping missing categories.
+        # The charts use the full year selected by the From Date, independently
+        # of the From/To filters used by the KPI cards above.
         chart_year = shared_start.year
+
+        # Delivery demand: always show all 12 months of the selected year.
+        monthly_source = orders.dropna(subset=["delivery_date"]).copy()
+        monthly_source = monthly_source[monthly_source["delivery_date"].dt.year == chart_year]
+        monthly = (monthly_source.assign(month_number=lambda x:x["delivery_date"].dt.month)
+                   .groupby("month_number")["qty"].sum()
+                   .reindex(range(1, 13), fill_value=0)
+                   .rename_axis("month_number").reset_index())
+        monthly["month"] = monthly["month_number"].map(lambda month: f"{chart_year}-{int(month):02d}")
+        fig=px.area(monthly,x="month",y="qty",title=T("trend"),template="plotly_white",markers=True,
+                    category_orders={"month": monthly["month"].tolist()})
+        fig.update_traces(line_color="#17634d",fillcolor="rgba(35,118,94,0.18)")
+        fig.update_layout(margin=dict(l=10,r=10,t=55,b=10),paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",font_color="#193d32",yaxis_title="Units",xaxis_title="Month")
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False, "displaylogo": False, "responsive": True})
+
+        # Production workload: all ISO weeks belonging to the selected year.
+        # Reindexing keeps zero-workload weeks visible.
         weeks_in_year = date(chart_year, 12, 28).isocalendar().week
         week_labels = [f"W {week:02d}" for week in range(1, weeks_in_year + 1)]
-        weekly_source = yprod.dropna(subset=["production_date"]).copy()
+        weekly_source = orders.dropna(subset=["production_date"]).copy()
         if not weekly_source.empty:
             iso = weekly_source["production_date"].dt.isocalendar()
             weekly_source["iso_year"] = iso.year.astype(int)
