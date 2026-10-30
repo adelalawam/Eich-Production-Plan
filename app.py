@@ -112,6 +112,16 @@ st.markdown("""
 .stApp input,.stApp textarea,.stApp [data-baseweb="select"]>div,.stApp [data-baseweb="input"]>div{background:#fff!important;color:#20352c!important;border-color:#cbd9d0!important;border-radius:9px!important}
 .stApp input::placeholder,.stApp textarea::placeholder{color:#7c8c82!important;opacity:1!important}
 .stApp [data-testid="stDateInput"] input{font-variant-numeric:tabular-nums}
+/* Use the EICH green accent for the selected day in every Streamlit calendar. */
+[data-baseweb="calendar"] button[aria-selected="true"],
+[data-baseweb="calendar"] [aria-selected="true"],
+[data-baseweb="calendar"] [role="gridcell"][aria-selected="true"]{
+    background:#246a52!important;color:#ffffff!important;border-color:#246a52!important;
+}
+[data-baseweb="calendar"] button[aria-selected="true"] *,
+[data-baseweb="calendar"] [aria-selected="true"] *{color:#ffffff!important}
+[data-baseweb="calendar"] button:hover{background:#e3f0e8!important;color:#174638!important}
+[data-baseweb="calendar"] button[aria-selected="true"]:hover{background:#174638!important;color:#ffffff!important}
 .stApp [data-baseweb="tag"]{background:#e3f0e8!important;border:1px solid #c4ddce!important;color:#174638!important;border-radius:8px!important}
 .stApp [data-baseweb="tag"] *{color:#174638!important}
 .js-plotly-plot .plotly .modebar{display:none!important}.dashboard-chart-stack .js-plotly-plot{margin-top:.25rem}.dashboard-chart-stack h2,.dashboard-chart-stack h3{margin-bottom:.35rem}.dashboard-chart-stack [data-testid="stVerticalBlock"]{gap:.55rem}
@@ -818,11 +828,28 @@ if page=="dashboard":
         )
     st.markdown("<div class='exec-card-grid'>" + "".join(metric_cards) + "</div>",unsafe_allow_html=True)
     st.write("")
-    k=st.columns(4)
-    k[0].metric(T("stock_units"),german_number(stock_total))
-    k[1].metric("Produced to date",german_number(produced_total))
-    k[2].metric("Delivered to date",german_number(delivered_total))
-    k[3].metric("Open deliveries",german_number(outstanding_del))
+    # Operational follow-up cards use the same descriptive layout as the
+    # executive snapshot cards above.
+    follow_up_metrics = [
+        (T("stock_units"), stock_total, "#245A48", "#C8E8D5",
+         "Total units currently available in stock"),
+        ("Produced to date", produced_total, "#234C70", "#D1E5F8",
+         "Units recorded as produced within the selected date range"),
+        ("Delivered to date", delivered_total, "#315B66", "#D1E9EC",
+         "Units recorded as delivered within the selected date range"),
+        ("Open deliveries", outstanding_del, "#65452E", "#F3D8BE",
+         "Ordered units still awaiting delivery in the selected date range"),
+    ]
+    follow_up_cards = []
+    for label, value, bg, accent, description in follow_up_metrics:
+        follow_up_cards.append(
+            f"<div class='exec-card' style='background:{bg};color:#fff'>"
+            f"<div class='exec-card-label' style='color:{accent}'>{label}</div>"
+            f"<div class='exec-card-value' style='color:#fff'>{german_number(value)}</div>"
+            f"<div class='exec-card-foot' style='color:{accent}'>{description}</div>"
+            f"</div>"
+        )
+    st.markdown("<div class='exec-card-grid'>" + "".join(follow_up_cards) + "</div>", unsafe_allow_html=True)
     st.divider()
     st.markdown("<div class='dashboard-chart-stack'>", unsafe_allow_html=True)
     with st.container():
