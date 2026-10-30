@@ -168,32 +168,38 @@ st.markdown("""
 [data-testid="stSidebar"] [data-testid="stFileUploaderDropzoneInstructions"] *{color:#17392d!important}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}
 
-/* Brown styling ONLY for the workspace navigation items:
-   Overview, Production plan, Delivery plan, Progress tracker,
-   Stock & articles, Data quality, and Exports. */
-[data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] > label{
-    background:#51392D!important;
-    border:1px solid #765541!important;
-    color:#FFFFFF!important;
-    box-shadow:0 3px 0 #302019!important;
-    border-radius:10px!important;
-    transition:transform .15s ease,background .15s ease,border-color .15s ease;
+/* Brown styling ONLY for the seven workspace navigation items. */
+[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label {
+    background: #51392D !important;
+    background-color: #51392D !important;
+    border: 1px solid #765541 !important;
+    color: #FFFFFF !important;
+    box-shadow: 0 3px 0 #302019 !important;
+    border-radius: 10px !important;
+    transition: transform .15s ease, background .15s ease, border-color .15s ease;
 }
-[data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] > label:hover{
-    background:#76523C!important;
-    border-color:#A98264!important;
-    transform:translateY(-1px);
+[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label:hover {
+    background: #76523C !important;
+    background-color: #76523C !important;
+    border-color: #A98264 !important;
+    transform: translateY(-1px);
 }
-[data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] > label:has(input:checked){
-    background:#E9D9C9!important;
-    border-color:#C6A88C!important;
-    box-shadow:0 3px 0 #B18A6B!important;
+[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label:has(input:checked),
+[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label:has([aria-checked="true"]) {
+    background: #E9D9C9 !important;
+    background-color: #E9D9C9 !important;
+    border-color: #C6A88C !important;
+    box-shadow: 0 3px 0 #B18A6B !important;
 }
-[data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] > label:has(input:checked) *{
-    color:#38251D!important;
+[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) *,
+[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label:has([aria-checked="true"]) * {
+    color: #38251D !important;
 }
-[data-testid="stSidebar"] [data-testid="stRadio"] div[role="radiogroup"] input[type="radio"]{
-    accent-color:#A87953!important;
+[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] label:not(:has(input:checked)):not(:has([aria-checked="true"])) * {
+    color: #FFFFFF !important;
+}
+[data-testid="stSidebar"] [data-testid="stRadio"] [role="radiogroup"] input[type="radio"] {
+    accent-color: #A87953 !important;
 }
 
 </style>
