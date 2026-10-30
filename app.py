@@ -777,13 +777,20 @@ if page=="dashboard":
         ("Seeds required",float(yprod["seeds_required"].sum()),"#60461A","#FFE0A0"),
         ("Open production",outstanding_prod,"#4B315F","#E4C7FF")
     ]
+    metric_descriptions = {
+        T("ordered"): "Total customer demand in the selected date range",
+        T("required"): "Units that need to be produced in the selected date range",
+        "Seeds required": "Total seed quantity needed for the planned production",
+        "Open production": "Production quantity still outstanding",
+    }
     metric_cards = []
     for label,value,bg,accent in metrics:
+        description = metric_descriptions.get(label, "")
         metric_cards.append(
             f"<div class='exec-card' style='background:{bg};color:#fff'>"
             f"<div class='exec-card-label' style='color:{accent}'>{label}</div>"
             f"<div class='exec-card-value' style='color:#fff'>{german_number(value)}</div>"
-            f"<div class='exec-card-foot' style='color:{accent}'>Planning year {year}</div>"
+            f"<div class='exec-card-foot' style='color:{accent}'>{description}</div>"
             f"</div>"
         )
     st.markdown("<div class='exec-card-grid'>" + "".join(metric_cards) + "</div>",unsafe_allow_html=True)
