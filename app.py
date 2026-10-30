@@ -133,6 +133,15 @@ st.markdown("""
 .hero .eyebrow{font-size:.7rem;letter-spacing:.17em;font-weight:800;color:#c4dfce}.hero .title{font-size:1.75rem;font-weight:820;line-height:1.2;margin-top:.35rem;color:#fff;letter-spacing:-.035em}.hero .subtitle{color:#d8e8de;margin-top:.45rem;font-size:.9rem}
 .section-title{font-size:1.55rem;font-weight:800;color:#174638;letter-spacing:-.035em}.section-sub{color:#718078;margin:.25rem 0 1.2rem;font-size:.94rem}
 .eyebrow{font-size:.72rem;letter-spacing:.13em;font-weight:800;color:#557366;margin:.2rem 0 .75rem}
+
+.exec-card-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;width:100%;max-width:100%;box-sizing:border-box;align-items:stretch}
+.exec-card{width:100%;min-width:0;min-height:150px;box-sizing:border-box;padding:18px;border-radius:15px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;box-shadow:0 6px 18px #102a2012}
+.exec-card-label{font-size:12px;font-weight:700;letter-spacing:.04em;line-height:1.35;overflow-wrap:anywhere}
+.exec-card-value{font-size:clamp(21px,2vw,27px);font-weight:800;line-height:1.2;margin-top:12px;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.exec-card-foot{font-size:11px;line-height:1.35;margin-top:8px;overflow-wrap:anywhere}
+@media(max-width:1100px){.exec-card-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.exec-card-grid{grid-template-columns:minmax(0,1fr);gap:10px}.exec-card{min-height:128px}}
+
 .login-card{background:linear-gradient(135deg,#12392e,#246a52);padding:2.2rem;border-radius:22px;color:#fff;margin:3rem auto 1rem;max-width:650px;text-align:center;box-shadow:0 18px 48px #12392e25}.login-card h1{color:#fff}.login-card p{color:#d8e8de}.login-brand{font-size:1.1rem;letter-spacing:.15em;font-weight:850;color:#d6e9dd}
 [data-testid="stVerticalBlock"]>div:has(> .hero){margin-bottom:.5rem}
 @media(max-width:900px){.block-container{padding:.9rem 1rem 2rem}.hero{padding:1.1rem 1.15rem}.hero .title{font-size:1.45rem}.stApp h1{font-size:1.65rem}}
@@ -272,7 +281,7 @@ with st.sidebar:
     st.caption("PRODUCTION PLANNING")
     st.selectbox("Language / Sprache", ["English","Deutsch"], key="language")
     st.divider()
-    nav = [T("dashboard"),T("production"),T("delivery"),T("progress"),T("stock"),T("quality"),T("exports")]
+    nav = [T("dashboard"),T("production"),T("delivery"),T("progress"),T("stock"),T("exports")]
     page_label = st.radio("Navigation", nav, label_visibility="collapsed", key="nav")
     st.divider()
     uploaded = st.file_uploader(T("upload"), type=["xlsx"], key="xlsx_upload")
@@ -646,12 +655,11 @@ default_year=2027 if 2027 in years else years[-1]
 # Use the detected default year internally; the year selector and sidebar descriptions are hidden.
 year = default_year
 
-page_map={T("dashboard"):"dashboard",T("production"):"production",T("delivery"):"delivery",T("progress"):"progress",T("stock"):"stock",T("quality"):"quality",T("exports"):"exports"}
+page_map={T("dashboard"):"dashboard",T("production"):"production",T("delivery"):"delivery",T("progress"):"progress",T("stock"):"stock",T("exports"):"exports"}
 page=page_map[page_label]
 
 # ---------- Overview ----------
 if page=="dashboard":
-    st.markdown(f"<div class='section-title'>{T('overview_title')} · {year}</div><div class='section-sub'>{T('overview_sub')}</div>",unsafe_allow_html=True)
     yorders=orders[orders["delivery_year"]==year].copy(); yprod=orders[orders["production_year"]==year].copy()
     prog=load_progress()
     produced_total=0.0; delivered_total=0.0
@@ -661,11 +669,22 @@ if page=="dashboard":
         delivered_total += float(prog.get(pkey("delivery",int(rr.delivery_year),rr.article,int(rr.delivery_week)),0))
     req=float(yprod["production_required"].sum()); ordered=float(yorders["qty"].sum()); outstanding_prod=max(0,req-produced_total); outstanding_del=max(0,ordered-delivered_total)
     st.markdown("<div class='eyebrow'>EXECUTIVE OPERATIONS SNAPSHOT</div>",unsafe_allow_html=True)
-    cards=st.columns(4)
-    metrics=[(T("ordered"),ordered,"#173D63","#D7E9FF"),(T("required"),req,"#163F35","#A7E3C5"),("Seeds required",float(yprod["seeds_required"].sum()),"#60461A","#FFE0A0"),("Open production",outstanding_prod,"#4B315F","#E4C7FF")]
-    for col,(label,value,bg,accent) in zip(cards,metrics):
-        with col:
-            st.markdown(f"<div style='background:{bg};color:#fff;padding:18px;border-radius:15px;min-height:126px;box-shadow:0 6px 18px #102a2012'><div style='color:{accent};font-size:12px;font-weight:700;letter-spacing:.04em'>{label}</div><div style='font-size:27px;font-weight:800;margin-top:12px;color:#fff'>{german_number(value)}</div><div style='font-size:11px;color:{accent};margin-top:4px'>Planning year {year}</div></div>",unsafe_allow_html=True)
+    metrics=[
+        (T("ordered"),ordered,"#173D63","#D7E9FF"),
+        (T("required"),req,"#163F35","#A7E3C5"),
+        ("Seeds required",float(yprod["seeds_required"].sum()),"#60461A","#FFE0A0"),
+        ("Open production",outstanding_prod,"#4B315F","#E4C7FF")
+    ]
+    metric_cards = []
+    for label,value,bg,accent in metrics:
+        metric_cards.append(
+            f"<div class='exec-card' style='background:{bg};color:#fff'>"
+            f"<div class='exec-card-label' style='color:{accent}'>{label}</div>"
+            f"<div class='exec-card-value' style='color:#fff'>{german_number(value)}</div>"
+            f"<div class='exec-card-foot' style='color:{accent}'>Planning year {year}</div>"
+            f"</div>"
+        )
+    st.markdown("<div class='exec-card-grid'>" + "".join(metric_cards) + "</div>",unsafe_allow_html=True)
     st.write("")
     k=st.columns(4)
     k[0].metric(T("stock_units"),german_number(stock_total))
@@ -808,4 +827,3 @@ elif page=="exports":
     output=make_excel({"Orders":orders,"Stock":stock,"Production Plan":production_plan,"Delivery Plan":delivery_plan,"Article Summary":article_summary,"Import Quality":quality})
     st.download_button(T("export_calc"),data=output,file_name=f"EICH_Production_Planning_{year}.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary")
     st.caption(T("data_note"))
-    
