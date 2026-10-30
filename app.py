@@ -125,6 +125,8 @@ st.markdown("""
 .stButton>button:hover,.stDownloadButton>button:hover{border-color:var(--eich-green-2);transform:translateY(-1px)}
 [data-testid="stDataFrame"],[data-testid="stDataEditor"],[data-testid="stTable"]{border:1px solid var(--eich-line);border-radius:13px;overflow:hidden;background:#fff}
 [data-testid="stDataFrame"] thead tr th,[data-testid="stTable"] thead tr th,[data-testid="stDataEditor"] thead tr th{background:#eaf2ed!important;color:#214b3a!important;font-weight:750!important;border-bottom:1px solid #d4e2d9!important}
+/* Weekly completion grid: keep the existing table styling, but use a red checked state. */
+[data-testid="stDataEditor"]{--gdg-accent-color:#c62828!important;--gdg-accent-fg:#ffffff!important;--gdg-accent-light:rgba(198,40,40,.16)!important}
 [data-testid="stDataFrame"] [role="grid"]{border-radius:12px}
 [data-testid="stExpander"]{background:#fff;border:1px solid var(--eich-line);border-radius:13px}
 [data-testid="stTabs"] button{font-weight:650}
@@ -517,15 +519,18 @@ def show_weekly_detail_table(frame, key, title, order_source, date_column, quant
     config = {}
     for display_week in week_cols:
         original_week = display_to_original[display_week]
-        editor[display_week] = pd.to_numeric(filtered[display_week], errors="coerce").fillna(0).astype(float)
+        # Use a fixed width for every week/checkbox pair so Streamlit does not
+        # auto-size later columns differently based on their contents.
+        raw_values = pd.to_numeric(filtered[display_week], errors="coerce").fillna(0).astype(float)
+        editor[display_week] = [f"{int(round(value)):^8}" for value in raw_values]
         done_col = f"✓ {display_week}"
         editor[done_col] = [
             bool(prog.get(pkey(detail_kind, int(original_week[:4]), row.get(article_col, ""), int(original_week[-2:])), 0))
             for _, row in filtered.iterrows()
         ]
         ordered_cols.extend([display_week, done_col])
-        config[display_week] = st.column_config.NumberColumn(display_week, format="%.0f", disabled=True, width="small")
-        config[done_col] = st.column_config.CheckboxColumn("✓", help=f"Mark {display_week} complete", default=False, width="small")
+        config[display_week] = st.column_config.TextColumn(display_week, disabled=True, width=84)
+        config[done_col] = st.column_config.CheckboxColumn("✓", help=f"Mark {display_week} complete", default=False, width=58)
 
     editor = editor[ordered_cols]
     edited = st.data_editor(
