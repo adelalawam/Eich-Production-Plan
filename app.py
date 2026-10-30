@@ -658,9 +658,37 @@ year = default_year
 page_map={T("dashboard"):"dashboard",T("production"):"production",T("delivery"):"delivery",T("progress"):"progress",T("stock"):"stock",T("exports"):"exports"}
 page=page_map[page_label]
 
+# ---------- Shared date range (all pages except Exports) ----------
+# Initialise once per session. Tab changes do not reset these values.
+if "shared_from_date" not in st.session_state:
+    st.session_state["shared_from_date"] = date.today()
+if "shared_to_date" not in st.session_state:
+    st.session_state["shared_to_date"] = date.today()
+
+if page != "exports":
+    st.markdown("<div class='section-title'>Date range</div>", unsafe_allow_html=True)
+    date_col_a, date_col_b = st.columns(2)
+    with date_col_a:
+        shared_start = st.date_input(
+            T("from"), key="shared_from_date", format="DD/MM/YYYY"
+        )
+    with date_col_b:
+        shared_end = st.date_input(
+            T("to"), key="shared_to_date", format="DD/MM/YYYY"
+        )
+    if shared_start > shared_end:
+        st.error(T("date_error"))
+        st.stop()
+else:
+    shared_start = st.session_state["shared_from_date"]
+    shared_end = st.session_state["shared_to_date"]
+
 # ---------- Overview ----------
 if page=="dashboard":
-    yorders=orders[orders["delivery_year"]==year].copy(); yprod=orders[orders["production_year"]==year].copy()
+    yorders=orders.dropna(subset=["delivery_date"]).copy()
+    yorders=yorders[(yorders["delivery_date"].dt.date>=shared_start)&(yorders["delivery_date"].dt.date<=shared_end)]
+    yprod=orders.dropna(subset=["production_date"]).copy()
+    yprod=yprod[(yprod["production_date"].dt.date>=shared_start)&(yprod["production_date"].dt.date<=shared_end)]
     prog=load_progress()
     produced_total=0.0; delivered_total=0.0
     for _, rr in yprod.groupby(["article","production_year","production_week"])["production_required"].sum().reset_index().iterrows():
@@ -724,10 +752,7 @@ if page=="dashboard":
 # ---------- Production planning ----------
 elif page=="production":
     st.markdown(f"<div class='section-title'>{T('prod_title')}</div><div class='section-sub'>{T('prod_sub')}</div>",unsafe_allow_html=True)
-    a,b=st.columns(2)
-    with a: start=st.date_input(T("from"),date(year,1,1),key="prod_start",format="DD/MM/YYYY")
-    with b: end=st.date_input(T("to"),date(year,12,31),key="prod_end",format="DD/MM/YYYY")
-    if start>end: st.error(T("date_error")); st.stop()
+    start, end = shared_start, shared_end
     v=orders.dropna(subset=["production_date"]).copy()
     v=v[(v["production_date"].dt.date>=start)&(v["production_date"].dt.date<=end)]
     if v.empty: st.info(T("no_rows"))
@@ -753,10 +778,7 @@ elif page=="production":
 # ---------- Delivery planning ----------
 elif page=="delivery":
     st.markdown(f"<div class='section-title'>{T('del_title')}</div><div class='section-sub'>{T('del_sub')}</div>",unsafe_allow_html=True)
-    a,b=st.columns(2)
-    with a: start=st.date_input(T("from"),date(year,1,1),key="del_start",format="DD/MM/YYYY")
-    with b: end=st.date_input(T("to"),date(year,12,31),key="del_end",format="DD/MM/YYYY")
-    if start>end: st.error(T("date_error")); st.stop()
+    start, end = shared_start, shared_end
     v=orders.dropna(subset=["delivery_date"]).copy()
     v=v[(v["delivery_date"].dt.date>=start)&(v["delivery_date"].dt.date<=end)]
     if v.empty: st.info(T("no_rows"))
@@ -780,7 +802,18 @@ elif page=="delivery":
 # ---------- Progress tracker ----------
 elif page=="progress":
     st.markdown(f"<div class='section-title'>{T('progress')}</div><div class='section-sub'>{T('progress_note')}</div>",unsafe_allow_html=True)
-    prog = load_progress()
+    all_progress = load_progress()
+    prog = {}
+    for progress_key, progress_value in all_progress.items():
+        parts = progress_key.split("|", 3)
+        if len(parts) == 4:
+            try:
+                week_start = date.fromisocalendar(int(parts[1]), int(parts[3]), 1)
+                week_end = week_start + pd.Timedelta(days=6)
+                if week_start <= shared_end and week_end >= shared_start:
+                    prog[progress_key] = progress_value
+            except (ValueError, TypeError):
+                continue
     completed = sum(1 for value in prog.values() if float(value or 0) > 0)
     m = st.columns(3)
     m[0].metric("Completed article-weeks", german_number(completed))
@@ -804,8 +837,24 @@ elif page=="progress":
 # ---------- Stock and articles ----------
 elif page=="stock":
     st.markdown(f"<div class='section-title'>{T('stock_title')}</div><div class='section-sub'>{T('stock_sub')}</div>",unsafe_allow_html=True)
-    display=article_summary.rename(columns={"article":T("article"),"description_stock":T("description"),"available_stock":T("stock_units"),"ordered_qty":T("ordered"),"order_lines":T("lines"),"stock_allocated_total":T("stock_allocated"),"production_required_total":T("required"),"shortage":T("shortage")}).sort_values(T("shortage"),ascending=False)
-    m=st.columns(3); m[0].metric(T("stock_units"),german_number(article_summary['available_stock'].sum())); m[1].metric(T("ordered"),german_number(article_summary['ordered_qty'].sum())); m[2].metric(T("shortage"),german_number(int((article_summary['shortage']>0).sum())))
+    stock_period_orders = orders.dropna(subset=["delivery_date"]).copy()
+    stock_period_orders = stock_period_orders[
+        (stock_period_orders["delivery_date"].dt.date >= shared_start)
+        & (stock_period_orders["delivery_date"].dt.date <= shared_end)
+    ]
+    period_demand = stock_period_orders.groupby("article",as_index=False).agg(
+        ordered_qty=("qty","sum"), order_lines=("qty","size")
+    )
+    period_alloc = stock_period_orders.groupby("article",as_index=False).agg(
+        stock_allocated_total=("stock_allocated","sum"),
+        production_required_total=("production_required","sum")
+    )
+    period_summary = stock.merge(period_demand,on="article",how="left").merge(period_alloc,on="article",how="left")
+    for c in ["ordered_qty","order_lines","stock_allocated_total","production_required_total"]:
+        period_summary[c] = period_summary[c].fillna(0)
+    period_summary["shortage"] = period_summary["production_required_total"]
+    display=period_summary.rename(columns={"article":T("article"),"description_stock":T("description"),"available_stock":T("stock_units"),"ordered_qty":T("ordered"),"order_lines":T("lines"),"stock_allocated_total":T("stock_allocated"),"production_required_total":T("required"),"shortage":T("shortage")}).sort_values(T("shortage"),ascending=False)
+    m=st.columns(3); m[0].metric(T("stock_units"),german_number(period_summary['available_stock'].sum())); m[1].metric(T("ordered"),german_number(period_summary['ordered_qty'].sum())); m[2].metric(T("shortage"),german_number(int((period_summary['shortage']>0).sum())))
     show_table(display,"stock_table",T("stock"))
 
 # ---------- Data quality ----------
