@@ -44,7 +44,7 @@ if not st.session_state.authenticated:
     [data-testid="stForm"] {
         position:fixed!important;
         left:24.0vw!important;
-        top:54.5vh!important;
+        top:60.5vh!important;
         width:52.0vw!important;
         max-width:none!important;
         margin:0!important;
@@ -81,7 +81,7 @@ if not st.session_state.authenticated:
         width:100%!important;
         height:clamp(58px,8.2vh,72px)!important;
         min-height:clamp(58px,8.2vh,72px)!important;
-        margin-top:clamp(22px,3.3vh,32px)!important;
+        margin-top:clamp(34px,5.0vh,46px)!important;
         background:rgba(0,90,35,.01)!important;
         color:transparent!important;
         border:0!important;
@@ -107,11 +107,11 @@ if not st.session_state.authenticated:
         }
         [data-testid="stForm"] {
             left:23vw!important;
-            top:54.5vh!important;
+            top:60.5vh!important;
             width:54vw!important;
         }
         [data-testid="stForm"] input {padding:0 34px!important;font-size:14px!important;}
-        [data-testid="stForm"] button {margin-top:2.8vh!important;}
+        [data-testid="stForm"] button {margin-top:5.0vh!important;}
         [data-testid="stAlert"] {left:12vw!important;width:76vw!important;}
     }
     </style>
@@ -1105,10 +1105,11 @@ def progress_report_pdf(kind, start_date, end_date):
 
 
 def render_plan_progress(kind, start_date, end_date):
-    """Display only checked completion records for the selected plan."""
+    """Display checked completion records in a compact table for one plan."""
     report = progress_report_frame(kind, start_date, end_date)
     tracked = len(report)
     total_qty = float(report["Completed quantity"].sum()) if tracked else 0.0
+
     metrics = st.columns(3)
     metrics[0].metric("Completed article-weeks", german_number(tracked))
     metrics[1].metric("Recorded completed quantity", german_number(total_qty))
@@ -1118,12 +1119,31 @@ def render_plan_progress(kind, start_date, end_date):
         st.info("No completed items yet. Tick a week checkbox in the planning table to add it here.")
         return
 
-    st.caption("This list updates automatically when you tick or untick a completion checkbox in the planning table.")
-    for _, row in report.iterrows():
-        st.markdown(
-            f"- **{row['Article']}**  ·  {int(row['Year'])} {row['Week']}  ·  "
-            f"Completed quantity: {german_number(float(row['Completed quantity']))}"
-        )
+    st.caption("This table updates automatically when you tick or untick a completion checkbox in the planning table.")
+
+    display = pd.DataFrame({
+        "Plan": ["Production" if kind == "production" else "Delivery"] * tracked,
+        "Year": report["Year"].astype(int),
+        "Article": report["Article"].astype(str),
+        "Week": report["Week"].astype(str),
+        "Completed": [True] * tracked,
+        "Completed quantity": report["Completed quantity"].astype(float),
+    })
+
+    st.dataframe(
+        display,
+        hide_index=True,
+        use_container_width=True,
+        height=min(440, 42 + 36 * (tracked + 1)),
+        column_config={
+            "Plan": st.column_config.TextColumn("Plan", width="small"),
+            "Year": st.column_config.NumberColumn("Year", format="%d", width="small"),
+            "Article": st.column_config.TextColumn("Article", width="medium"),
+            "Week": st.column_config.TextColumn("Week", width="small"),
+            "Completed": st.column_config.CheckboxColumn("Completed", disabled=True, width="small"),
+            "Completed quantity": st.column_config.NumberColumn("Completed quantity", format="localized", width="medium"),
+        },
+    )
 
 
 # ---------- Overview ----------
