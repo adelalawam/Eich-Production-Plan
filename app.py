@@ -1345,20 +1345,19 @@ elif page=="production":
             if _label not in weeks: weeks.append(_label)
         weeks.sort(key=lambda _w: (int(_w[:4]), int(_w[-2:])))
         v["Week"]=v["production_date"].apply(lambda d:f"{int(d.isocalendar().year)}-W{int(d.isocalendar().week):02d}")
-        # Production Plan weekly seed demand is independent of stock availability.
-        # Allocate each order's qty * Required Seeds factor to that order's
-        # production week; never subtract or cap it using Material ID stock.
-        v["weekly_seeds_required"] = (
+        # Weekly Production Plan shows finished Article quantities exactly as
+        # ordered. Required Seeds is a separate material-consumption total and
+        # must never replace or multiply the weekly production quantities.
+        v["weekly_production_qty"] = (
             pd.to_numeric(v["qty"], errors="coerce").fillna(0).clip(lower=0)
-            * pd.to_numeric(v["seeds_per_article"], errors="coerce").fillna(0).clip(lower=0)
         )
-        pivot=v.pivot_table(index=["article","description","material_id"],columns="Week",values="weekly_seeds_required",aggfunc="sum",fill_value=0).reset_index(); pivot.columns.name=None
-        seed_totals=v.groupby(["article","description","material_id"],dropna=False,as_index=False).agg(seeds_required=("weekly_seeds_required","sum"))
+        pivot=v.pivot_table(index=["article","description","material_id"],columns="Week",values="weekly_production_qty",aggfunc="sum",fill_value=0).reset_index(); pivot.columns.name=None
+        seed_totals=v.groupby(["article","description","material_id"],dropna=False,as_index=False).agg(seeds_required=("seeds_required","sum"))
         pivot=pivot.merge(seed_totals,on=["article","description","material_id"],how="left")
         for w in weeks:
             if w not in pivot.columns: pivot[w]=0
         pivot=pivot[["article","description","material_id","seeds_required"]+weeks].rename(columns={"article":T("article"),"description":T("description"),"material_id":"Material ID","seeds_required":"Seeds required"})
-        show_weekly_detail_table(pivot,"prod_weekly",T("production"),v,"production_date","weekly_seeds_required","production",f"{start:%d-%b-%Y} – {end:%d-%b-%Y}")
+        show_weekly_detail_table(pivot,"prod_weekly",T("production"),v,"production_date","weekly_production_qty","production",f"{start:%d-%b-%Y} – {end:%d-%b-%Y}")
 
     st.divider()
     if "production_progress_visible" not in st.session_state:
