@@ -493,19 +493,21 @@ def save_progress(obj):
 def pkey(kind,year,article,week): return f"{kind}|{int(year)}|{str(article)}|{int(week):02d}"
 
 # ---------- Column filters, PDF and filtered exports ----------
-def filter_table(frame, key):
+def filter_table(frame, key, title="Filtered data", subtitle=""):
+    """Render the article filter and filtered-file downloads in one toolbar row."""
     result = frame.copy()
     columns = list(result.columns)
 
-    # Keep the Article filter; sorting and reset controls have been removed.
     article_col = next(
         (c for c in columns if normalize(c) in {
             "article", "artikel", "articlenumber", "artikelnummer", "articleid"
         }),
         None,
     )
+
+    # Keep the filter on the left and both export actions beside it.
+    c_filter, c_excel, c_pdf = st.columns([2.5, 1.35, 1.35])
     if article_col is not None:
-        c_filter, = st.columns([2.4])
         with c_filter:
             vals = sorted(
                 result[article_col].dropna().astype(str).unique().tolist(),
@@ -517,6 +519,33 @@ def filter_table(frame, key):
             )
             if selected != T("all_articles"):
                 result = result[result[article_col].astype(str) == selected]
+    else:
+        with c_filter:
+            st.caption(T("article_filter"))
+
+    safe = re.sub(r"[^A-Za-z0-9]+", "_", str(title)).strip("_") or "Filtered_data"
+    with c_excel:
+        st.download_button(
+            T("download_excel"),
+            data=make_excel({"Filtered data": result}),
+            file_name=f"EICH_{safe}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"{key}_xlsx",
+            use_container_width=True,
+        )
+    with c_pdf:
+        try:
+            pdf = pdf_bytes(result, str(title), subtitle)
+            st.download_button(
+                T("download_pdf"),
+                data=pdf,
+                file_name=f"EICH_{safe}.pdf",
+                mime="application/pdf",
+                key=f"{key}_pdf",
+                use_container_width=True,
+            )
+        except ImportError:
+            st.warning(T("pdf_missing"))
 
     st.caption(f"{T('rows')}: {german_number(len(result))} / {german_number(len(frame))}")
     return result
@@ -572,18 +601,8 @@ def pdf_bytes(frame,title,subtitle=""):
         ("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),3)]))
     story.append(tbl); doc.build(story); return out.getvalue()
 def show_table(frame,key,title,subtitle=""):
-    filtered=filter_table(frame,key)
+    filtered=filter_table(frame,key,title,subtitle)
     st.dataframe(display_frame(filtered),use_container_width=True,hide_index=True,height=470)
-    c1,c2=st.columns(2)
-    safe=re.sub(r"[^A-Za-z0-9]+","_",title).strip("_")
-    with c1:
-        st.download_button(T("download_excel"),data=make_excel({"Filtered data":filtered}),file_name=f"EICH_{safe}.xlsx",mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key=f"{key}_xlsx")
-    with c2:
-        try:
-            pdf=pdf_bytes(filtered,title,subtitle)
-            st.download_button(T("download_pdf"),data=pdf,file_name=f"EICH_{safe}.pdf",mime="application/pdf",key=f"{key}_pdf")
-        except ImportError:
-            st.warning(T("pdf_missing"))
     return filtered
 
 def show_weekly_detail_table(frame, key, title, order_source, date_column, quantity_column, detail_kind, subtitle=""):
@@ -603,7 +622,7 @@ def show_weekly_detail_table(frame, key, title, order_source, date_column, quant
     display_frame = frame.rename(columns=display_names).copy()
 
     # Reuse the same article filtering and sorting controls as Stock & articles.
-    filtered = filter_table(display_frame, f"{key}_filters").reset_index(drop=True)
+    filtered = filter_table(display_frame, f"{key}_filters", title, subtitle).reset_index(drop=True)
     week_cols = [c for c in filtered.columns if re.fullmatch(r"(?:\d{4} )?W \d{2}", str(c))]
     editor = filtered[[c for c in filtered.columns if c not in week_cols]].copy()
     ordered_cols = list(editor.columns)
