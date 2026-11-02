@@ -65,17 +65,23 @@ if not st.session_state.authenticated:
         height:clamp(48px,6.4vh,62px)!important;
         min-height:clamp(48px,6.4vh,62px)!important;
         width:100%!important;
-        background:rgba(255,255,255,.02)!important;
-        border:0!important;
+        background:rgba(255,255,255,.10)!important;
+        border:1px solid rgba(255,255,255,.22)!important;
         border-radius:14px!important;
-        box-shadow:none!important;
-        color:#183c2a!important;
+        box-shadow:inset 0 1px 2px rgba(15,45,28,.06)!important;
+        color:#123b27!important;
+        caret-color:#08783b!important;
         font-size:18px!important;
+        font-weight:600!important;
+        letter-spacing:.02em!important;
         padding:0 54px!important;
+        transition:border-color .18s ease, box-shadow .18s ease, background .18s ease!important;
     }
     [data-testid="stForm"] input:focus {
-        outline:2px solid rgba(24,100,54,.28)!important;
-        box-shadow:none!important;
+        outline:2px solid rgba(20,105,55,.38)!important;
+        outline-offset:2px!important;
+        background:rgba(255,255,255,.16)!important;
+        box-shadow:0 0 0 4px rgba(20,105,55,.08), inset 0 1px 2px rgba(15,45,28,.05)!important;
     }
     [data-testid="stForm"] button {
         width:100%!important;
@@ -88,10 +94,20 @@ if not st.session_state.authenticated:
         box-shadow:none!important;
         border-radius:18px!important;
         font-size:0!important;
+        cursor:pointer!important;
+        transition:background .18s ease, box-shadow .18s ease, transform .18s ease!important;
     }
     [data-testid="stForm"] button:hover {
-        background:rgba(0,90,35,.06)!important;
-        box-shadow:0 0 0 2px rgba(0,90,35,.12)!important;
+        background:rgba(0,90,35,.10)!important;
+        box-shadow:0 5px 16px rgba(0,65,28,.14), 0 0 0 1px rgba(0,90,35,.16)!important;
+    }
+    [data-testid="stForm"] button:active {
+        transform:translateY(1px)!important;
+        box-shadow:inset 0 2px 5px rgba(0,40,18,.14)!important;
+    }
+    [data-testid="stForm"] button:focus-visible {
+        outline:3px solid rgba(15,105,55,.45)!important;
+        outline-offset:3px!important;
     }
     [data-testid="stAlert"] {
         position:fixed!important;
@@ -99,6 +115,10 @@ if not st.session_state.authenticated:
         top:84vh!important;
         width:52vw!important;
         z-index:20;
+        border:1px solid rgba(160,35,35,.18)!important;
+        border-radius:12px!important;
+        box-shadow:0 8px 24px rgba(20,35,25,.12)!important;
+        backdrop-filter:blur(10px)!important;
     }
     @media(max-width:700px) {
         [data-testid="stAppViewContainer"] {
