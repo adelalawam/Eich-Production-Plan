@@ -58,18 +58,38 @@ if not st.session_state.authenticated:
         clip-path:polygon(100% 0,100% 100%,0 100%,18% 82%,34% 67%,51% 51%,68% 34%,84% 17%);
         border-top-left-radius:58%;
     }}
+    /* CSS-only nursery foliage accents inspired by the EICH greenhouse */
+    .login-card:before {{
+        content:""; position:absolute; left:-5.5rem; bottom:5.5rem;
+        width:190px; height:170px; pointer-events:none; opacity:.20;
+        background:
+          radial-gradient(ellipse 28px 58px at 38% 38%, #8fbd72 0 97%, transparent 100%),
+          radial-gradient(ellipse 25px 53px at 70% 35%, #a5c987 0 97%, transparent 100%),
+          linear-gradient(75deg, transparent 48%, #6d9d56 49% 51%, transparent 52%);
+        transform:rotate(-18deg);
+    }}
+    .login-card:after {{
+        content:""; position:absolute; right:-3.5rem; bottom:-1.5rem;
+        width:210px; height:190px; pointer-events:none; opacity:.22;
+        background:
+          radial-gradient(ellipse 30px 64px at 30% 36%, #8fbd72 0 97%, transparent 100%),
+          radial-gradient(ellipse 26px 58px at 67% 26%, #a5c987 0 97%, transparent 100%),
+          linear-gradient(75deg, transparent 48%, #6d9d56 49% 51%, transparent 52%);
+        transform:rotate(22deg);
+    }}
     [data-testid="stHeader"] {{background:transparent}}
     .block-container {{max-width:760px!important;padding:5vh 1.25rem 3rem!important;position:relative;z-index:1}}
     .login-card {{
-        text-align:center; background:rgba(255,255,255,.91); backdrop-filter:blur(12px);
+        position:relative; overflow:hidden; text-align:center;
+        background:rgba(255,255,255,.91); backdrop-filter:blur(12px);
         border:1px solid #e0eae3; border-radius:26px 26px 0 0;
         padding:2.3rem 2.6rem 1.35rem; margin:0 auto;
         box-shadow:0 18px 55px rgba(23,70,56,.10);
     }}
-    .login-logo {{display:block;width:min(100%,390px);height:auto;object-fit:contain;margin:0 auto 1.5rem}}
-    .login-kicker {{font-size:.72rem;letter-spacing:.19em;font-weight:800;color:#54816a;text-transform:uppercase;margin-bottom:.55rem}}
-    .login-title {{font-size:clamp(2rem,5vw,2.8rem);line-height:1.08;letter-spacing:-.055em;font-weight:850;color:#174638;margin:0}}
-    .login-subtitle {{font-size:1rem;color:#718078;margin:.7rem 0 .15rem}}
+    .login-logo {{position:relative;z-index:1;display:block;width:min(100%,390px);height:auto;object-fit:contain;margin:0 auto 1.5rem}}
+    .login-kicker {{position:relative;z-index:1;font-size:.72rem;letter-spacing:.19em;font-weight:800;color:#54816a;text-transform:uppercase;margin-bottom:.55rem}}
+    .login-title {{position:relative;z-index:1;font-size:clamp(2rem,5vw,2.8rem);line-height:1.08;letter-spacing:-.055em;font-weight:850;color:#174638;margin:0}}
+    .login-subtitle {{position:relative;z-index:1;font-size:1rem;color:#718078;margin:.7rem 0 .15rem}}
     [data-testid="stForm"] {{
         max-width:760px; margin:0 auto; padding:1.35rem 2.6rem 2.25rem!important;
         background:rgba(255,255,255,.91); border:1px solid #e0eae3;
@@ -770,7 +790,10 @@ def show_weekly_detail_table(frame, key, title, order_source, date_column, quant
                 planned_value = pd.to_numeric(
                     pd.Series([source_row[display_week]]), errors="coerce"
                 ).fillna(0).iloc[0]
-                prog[k] = float(planned_value) if now else 0
+                if now:
+                    prog[k] = float(planned_value)
+                else:
+                    prog.pop(k, None)
                 changed = True
     if changed:
         save_progress(prog)
@@ -1040,6 +1063,8 @@ def progress_report_frame(kind, start_date, end_date):
             if week_start > end_date or week_end < start_date:
                 continue
             quantity = float(value or 0)
+            if quantity <= 0:
+                continue
         except (ValueError, TypeError):
             continue
         rows.append({
@@ -1080,46 +1105,25 @@ def progress_report_pdf(kind, start_date, end_date):
 
 
 def render_plan_progress(kind, start_date, end_date):
-    """Show progress rows with individual uncheck and delete actions."""
+    """Display only checked completion records for the selected plan."""
     report = progress_report_frame(kind, start_date, end_date)
     tracked = len(report)
-    completed = int((report["Completed quantity"] > 0).sum()) if tracked else 0
+    total_qty = float(report["Completed quantity"].sum()) if tracked else 0.0
     metrics = st.columns(3)
-    metrics[0].metric("Completed article-weeks", german_number(completed))
-    metrics[1].metric("Tracked article-weeks", german_number(tracked))
-    metrics[2].metric("Completion rate", f"{completed / tracked * 100:.1f}%" if tracked else "0.0%")
+    metrics[0].metric("Completed article-weeks", german_number(tracked))
+    metrics[1].metric("Recorded completed quantity", german_number(total_qty))
+    metrics[2].metric("Completion status", "Completed" if tracked else "No completed items")
 
     if report.empty:
-        st.info("No completion records are available for this plan in the selected date range.")
+        st.info("No completed items yet. Tick a week checkbox in the planning table to add it here.")
         return
 
-    st.caption("Use Uncheck to reset a completion record to zero, or Delete to remove the record completely.")
-    for idx, row in report.iterrows():
-        info_col, uncheck_col, delete_col = st.columns([5.2, 1.15, 0.95])
-        with info_col:
-            status_label = "Completed" if float(row["Completed quantity"]) > 0 else "Not completed"
-            st.markdown(
-                f"**{row['Article']}**  ·  {int(row['Year'])} {row['Week']}  ·  "
-                f"{status_label}  ·  Qty: {german_number(float(row['Completed quantity']))}"
-            )
-        row_key = str(row["_key"])
-        safe_key = re.sub(r"[^A-Za-z0-9]+", "_", row_key).strip("_")
-        with uncheck_col:
-            if st.button("Uncheck", key=f"{kind}_progress_uncheck_{idx}_{safe_key}",
-                         disabled=float(row["Completed quantity"]) <= 0,
-                         use_container_width=True):
-                current = load_progress()
-                if row_key in current:
-                    current[row_key] = 0
-                    save_progress(current)
-                st.rerun()
-        with delete_col:
-            if st.button("Delete", key=f"{kind}_progress_delete_{idx}_{safe_key}",
-                         use_container_width=True, type="secondary"):
-                current = load_progress()
-                current.pop(row_key, None)
-                save_progress(current)
-                st.rerun()
+    st.caption("This list updates automatically when you tick or untick a completion checkbox in the planning table.")
+    for _, row in report.iterrows():
+        st.markdown(
+            f"**{row['Article']}**  ·  {int(row['Year'])} {row['Week']}  ·  "
+            f"Completed quantity: {german_number(float(row['Completed quantity']))}"
+        )
         st.divider()
 
 
