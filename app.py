@@ -1024,8 +1024,8 @@ if shared_start > shared_end:
     st.error(T("date_error"))
     st.stop()
 
-def render_plan_progress(kind, start_date, end_date):
-    """Show saved completion records for one plan within the selected date range."""
+def progress_report_frame(kind, start_date, end_date):
+    """Build the saved progress rows for one plan and date range."""
     all_progress = load_progress()
     rows = []
     for key, value in all_progress.items():
@@ -1046,23 +1046,82 @@ def render_plan_progress(kind, start_date, end_date):
             "Year": year_num,
             "Article": parts[2],
             "Week": f"W{week_num:02d}",
-            "Completed": quantity > 0,
+            "Status": "Completed" if quantity > 0 else "Not completed",
             "Completed quantity": quantity,
+            "_key": key,
         })
+    if not rows:
+        return pd.DataFrame(columns=["Year", "Article", "Week", "Status", "Completed quantity", "_key"])
+    return pd.DataFrame(rows).sort_values(
+        ["Year", "Week", "Article"], kind="stable"
+    ).reset_index(drop=True)
 
-    completed = sum(1 for row in rows if row["Completed"])
-    tracked = len(rows)
+
+def progress_report_pdf(kind, start_date, end_date):
+    """Create a formatted PDF report with plan-specific progress KPIs."""
+    report = progress_report_frame(kind, start_date, end_date)
+    visible = report.drop(columns=["_key"], errors="ignore").copy()
+    tracked = len(report)
+    completed = int((report["Completed quantity"] > 0).sum()) if tracked else 0
+    total_qty = float(report["Completed quantity"].sum()) if tracked else 0.0
+    plan_name = "Production" if kind == "production" else "Delivery"
+    summary = pd.DataFrame([
+        {"Metric": "Plan", "Value": plan_name},
+        {"Metric": "Date range", "Value": f"{start_date:%d-%b-%Y} to {end_date:%d-%b-%Y}"},
+        {"Metric": "Completed article-weeks", "Value": f"{completed} / {tracked}"},
+        {"Metric": "Completion rate", "Value": f"{completed / tracked * 100:.1f}%" if tracked else "0.0%"},
+        {"Metric": "Recorded completed quantity", "Value": german_number(total_qty)},
+    ])
+    pdf = pdf_bytes(visible, f"EICH {plan_name} Progress Report",
+                    f"Reporting period: {start_date:%d-%b-%Y} – {end_date:%d-%b-%Y} | "
+                    f"Completed: {completed}/{tracked} ({completed / tracked * 100:.1f}%)" if tracked else
+                    f"Reporting period: {start_date:%d-%b-%Y} – {end_date:%d-%b-%Y} | No progress records")
+    return pdf
+
+
+def render_plan_progress(kind, start_date, end_date):
+    """Show progress rows with individual uncheck and delete actions."""
+    report = progress_report_frame(kind, start_date, end_date)
+    tracked = len(report)
+    completed = int((report["Completed quantity"] > 0).sum()) if tracked else 0
     metrics = st.columns(3)
     metrics[0].metric("Completed article-weeks", german_number(completed))
     metrics[1].metric("Tracked article-weeks", german_number(tracked))
     metrics[2].metric("Completion rate", f"{completed / tracked * 100:.1f}%" if tracked else "0.0%")
-    if rows:
-        progress_frame = pd.DataFrame(rows).sort_values(
-            ["Year", "Week", "Article"], kind="stable"
-        )
-        st.dataframe(progress_frame, use_container_width=True, hide_index=True)
-    else:
+
+    if report.empty:
         st.info("No completion records are available for this plan in the selected date range.")
+        return
+
+    st.caption("Use Uncheck to reset a completion record to zero, or Delete to remove the record completely.")
+    for idx, row in report.iterrows():
+        info_col, uncheck_col, delete_col = st.columns([5.2, 1.15, 0.95])
+        with info_col:
+            status_label = "Completed" if float(row["Completed quantity"]) > 0 else "Not completed"
+            st.markdown(
+                f"**{row['Article']}**  ·  {int(row['Year'])} {row['Week']}  ·  "
+                f"{status_label}  ·  Qty: {german_number(float(row['Completed quantity']))}"
+            )
+        row_key = str(row["_key"])
+        safe_key = re.sub(r"[^A-Za-z0-9]+", "_", row_key).strip("_")
+        with uncheck_col:
+            if st.button("Uncheck", key=f"{kind}_progress_uncheck_{idx}_{safe_key}",
+                         disabled=float(row["Completed quantity"]) <= 0,
+                         use_container_width=True):
+                current = load_progress()
+                if row_key in current:
+                    current[row_key] = 0
+                    save_progress(current)
+                st.rerun()
+        with delete_col:
+            if st.button("Delete", key=f"{kind}_progress_delete_{idx}_{safe_key}",
+                         use_container_width=True, type="secondary"):
+                current = load_progress()
+                current.pop(row_key, None)
+                save_progress(current)
+                st.rerun()
+        st.divider()
+
 
 # ---------- Overview ----------
 if page=="dashboard":
@@ -1217,12 +1276,26 @@ elif page=="production":
     st.divider()
     if "production_progress_visible" not in st.session_state:
         st.session_state["production_progress_visible"] = False
-    if st.button(
-        "Hide Progress" if st.session_state["production_progress_visible"] else "Show Progress",
-        key="toggle_production_progress",
-        use_container_width=False,
-    ):
-        st.session_state["production_progress_visible"] = not st.session_state["production_progress_visible"]
+    progress_btn_col, progress_pdf_col = st.columns([1, 1.15])
+    with progress_btn_col:
+        if st.button(
+            "Hide Progress" if st.session_state["production_progress_visible"] else "Show Progress",
+            key="toggle_production_progress",
+            use_container_width=True,
+        ):
+            st.session_state["production_progress_visible"] = not st.session_state["production_progress_visible"]
+    with progress_pdf_col:
+        try:
+            st.download_button(
+                "Download PDF",
+                data=progress_report_pdf("production", start, end),
+                file_name=f"EICH_Production_Progress_{start:%Y%m%d}_{end:%Y%m%d}.pdf",
+                mime="application/pdf",
+                key="download_production_progress_pdf",
+                use_container_width=True,
+            )
+        except ImportError:
+            st.warning(T("pdf_missing"))
     if st.session_state["production_progress_visible"]:
         st.markdown(f"<div class='section-title'>{T('progress')} · Production</div>", unsafe_allow_html=True)
         render_plan_progress("production", start, end)
@@ -1253,12 +1326,26 @@ elif page=="delivery":
     st.divider()
     if "delivery_progress_visible" not in st.session_state:
         st.session_state["delivery_progress_visible"] = False
-    if st.button(
-        "Hide Progress" if st.session_state["delivery_progress_visible"] else "Show Progress",
-        key="toggle_delivery_progress",
-        use_container_width=False,
-    ):
-        st.session_state["delivery_progress_visible"] = not st.session_state["delivery_progress_visible"]
+    progress_btn_col, progress_pdf_col = st.columns([1, 1.15])
+    with progress_btn_col:
+        if st.button(
+            "Hide Progress" if st.session_state["delivery_progress_visible"] else "Show Progress",
+            key="toggle_delivery_progress",
+            use_container_width=True,
+        ):
+            st.session_state["delivery_progress_visible"] = not st.session_state["delivery_progress_visible"]
+    with progress_pdf_col:
+        try:
+            st.download_button(
+                "Download PDF",
+                data=progress_report_pdf("delivery", start, end),
+                file_name=f"EICH_Delivery_Progress_{start:%Y%m%d}_{end:%Y%m%d}.pdf",
+                mime="application/pdf",
+                key="download_delivery_progress_pdf",
+                use_container_width=True,
+            )
+        except ImportError:
+            st.warning(T("pdf_missing"))
     if st.session_state["delivery_progress_visible"]:
         st.markdown(f"<div class='section-title'>{T('progress')} · Delivery</div>", unsafe_allow_html=True)
         render_plan_progress("delivery", start, end)
