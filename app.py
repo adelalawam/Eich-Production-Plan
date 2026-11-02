@@ -1073,9 +1073,17 @@ if shared_start > shared_end:
     st.stop()
 
 def progress_report_frame(kind, start_date, end_date):
-    """Build the saved progress rows for one plan and date range."""
+    """Build saved progress rows for one plan and selected date range."""
     all_progress = load_progress()
     rows = []
+    article_names = {}
+    if "description" in orders.columns and "article" in orders.columns:
+        names = orders[["article", "description"]].copy()
+        names["article"] = names["article"].astype(str).str.strip()
+        names["description"] = names["description"].fillna("").astype(str).str.strip()
+        names = names[names["description"].ne("")].drop_duplicates("article", keep="first")
+        article_names = dict(zip(names["article"], names["description"]))
+
     for key, value in all_progress.items():
         parts = key.split("|", 3)
         if len(parts) != 4 or parts[0] != kind:
@@ -1092,64 +1100,79 @@ def progress_report_frame(kind, start_date, end_date):
                 continue
         except (ValueError, TypeError):
             continue
+        article = str(parts[2]).strip()
         rows.append({
-            "Year": year_num,
-            "Article": parts[2],
+            "Article": article,
+            "Article name": article_names.get(article, ""),
             "Week": f"W{week_num:02d}",
-            "Status": "Completed" if quantity > 0 else "Not completed",
+            "Status": "Completed",
             "Completed quantity": quantity,
             "_key": key,
+            "_year": year_num,
         })
     if not rows:
-        return pd.DataFrame(columns=["Year", "Article", "Week", "Status", "Completed quantity", "_key"])
+        return pd.DataFrame(columns=["Article", "Article name", "Week", "Status", "Completed quantity", "_key", "_year"])
     return pd.DataFrame(rows).sort_values(
-        ["Year", "Week", "Article"], kind="stable"
+        ["_year", "Week", "Article"], kind="stable"
     ).reset_index(drop=True)
+
+
+def progress_required_quantity(kind, start_date, end_date):
+    """Calculate required quantity inside the selected calendar date range."""
+    date_col = "production_date" if kind == "production" else "delivery_date"
+    qty_col = "production_required" if kind == "production" else "qty"
+    if date_col not in orders.columns or qty_col not in orders.columns:
+        return 0.0
+    source = orders.dropna(subset=[date_col]).copy()
+    selected = source[
+        (source[date_col].dt.date >= start_date) &
+        (source[date_col].dt.date <= end_date)
+    ]
+    return float(pd.to_numeric(selected[qty_col], errors="coerce").fillna(0).clip(lower=0).sum())
 
 
 def progress_report_pdf(kind, start_date, end_date):
     """Create a formatted PDF report with plan-specific progress KPIs."""
     report = progress_report_frame(kind, start_date, end_date)
-    visible = report.drop(columns=["_key"], errors="ignore").copy()
+    visible = report.drop(columns=["_key", "_year"], errors="ignore").copy()
     tracked = len(report)
-    completed = int((report["Completed quantity"] > 0).sum()) if tracked else 0
     total_qty = float(report["Completed quantity"].sum()) if tracked else 0.0
+    required_qty = progress_required_quantity(kind, start_date, end_date)
+    completion_rate = (total_qty / required_qty * 100) if required_qty > 0 else 0.0
     plan_name = "Production" if kind == "production" else "Delivery"
-    summary = pd.DataFrame([
-        {"Metric": "Plan", "Value": plan_name},
-        {"Metric": "Date range", "Value": f"{start_date:%d-%b-%Y} to {end_date:%d-%b-%Y}"},
-        {"Metric": "Completed article-weeks", "Value": f"{completed} / {tracked}"},
-        {"Metric": "Completion rate", "Value": f"{completed / tracked * 100:.1f}%" if tracked else "0.0%"},
-        {"Metric": "Recorded completed quantity", "Value": german_number(total_qty)},
-    ])
     pdf = pdf_bytes(visible, f"EICH {plan_name} Progress Report",
                     f"Reporting period: {start_date:%d-%b-%Y} – {end_date:%d-%b-%Y} | "
-                    f"Completed: {completed}/{tracked} ({completed / tracked * 100:.1f}%)" if tracked else
-                    f"Reporting period: {start_date:%d-%b-%Y} – {end_date:%d-%b-%Y} | No progress records")
+                    f"Completed quantity: {german_number(total_qty)} / Required quantity: "
+                    f"{german_number(required_qty)} | Completion: {completion_rate:.1f}%")
     return pdf
 
 
 def render_plan_progress(kind, start_date, end_date):
-    """Display checked completion records in a compact table for one plan."""
+    """Display completed progress records and quantity-based completion percentage."""
     report = progress_report_frame(kind, start_date, end_date)
     tracked = len(report)
     total_qty = float(report["Completed quantity"].sum()) if tracked else 0.0
+    required_qty = progress_required_quantity(kind, start_date, end_date)
+    completion_rate = (total_qty / required_qty * 100) if required_qty > 0 else 0.0
 
     metrics = st.columns(3)
     metrics[0].metric("Completed article-weeks", german_number(tracked))
-    metrics[1].metric("Recorded completed quantity", german_number(total_qty))
-    metrics[2].metric("Completion status", "Completed" if tracked else "No completed items")
+    metrics[1].metric("Completed quantity", german_number(total_qty))
+    metrics[2].metric("Completion vs. required", f"{completion_rate:.1f}%")
 
     if report.empty:
         st.info("No completed items yet. Tick a week checkbox in the planning table to add it here.")
         return
 
-    st.caption("This table updates automatically when you tick or untick a completion checkbox in the planning table.")
+    st.caption(
+        f"Completion is calculated against the required quantity for the selected date range: "
+        f"{german_number(total_qty)} completed out of {german_number(required_qty)} required."
+    )
 
     display = pd.DataFrame({
         "Plan": ["Production" if kind == "production" else "Delivery"] * tracked,
-        "Year": report["Year"].astype(int),
         "Article": report["Article"].astype(str),
+        "Article name": report["Article name"].astype(str),
         "Week": report["Week"].astype(str),
         "Completed": [True] * tracked,
         "Completed quantity": report["Completed quantity"].astype(float),
@@ -1162,11 +1185,13 @@ def render_plan_progress(kind, start_date, end_date):
         height=min(440, 42 + 36 * (tracked + 1)),
         column_config={
             "Plan": st.column_config.TextColumn("Plan", width="small"),
-            "Year": st.column_config.NumberColumn("Year", format="%d", width="small"),
             "Article": st.column_config.TextColumn("Article", width="medium"),
+            "Article name": st.column_config.TextColumn("Article name", width="large"),
             "Week": st.column_config.TextColumn("Week", width="small"),
             "Completed": st.column_config.CheckboxColumn("Completed", disabled=True, width="small"),
-            "Completed quantity": st.column_config.NumberColumn("Completed quantity", format="localized", width="medium"),
+            "Completed quantity": st.column_config.NumberColumn(
+                "Completed quantity", format="localized", width="medium"
+            ),
         },
     )
 
