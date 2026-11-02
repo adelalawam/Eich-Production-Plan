@@ -574,32 +574,126 @@ def display_frame(frame):
     return out
 
 def pdf_bytes(frame,title,subtitle=""):
+    """Create a readable landscape PDF with wrapped cells and content-aware widths."""
+    from xml.sax.saxutils import escape
     from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4,landscape
-    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.enums import TA_LEFT
     from reportlab.lib.units import mm
-    from reportlab.platypus import SimpleDocTemplate,Paragraph,Spacer,Table,TableStyle
-    out=BytesIO()
-    doc=SimpleDocTemplate(out,pagesize=landscape(A4),rightMargin=7*mm,leftMargin=7*mm,topMargin=8*mm,bottomMargin=8*mm)
-    styles=getSampleStyleSheet()
-    story=[Paragraph(title.replace("&","&amp;"),styles["Title"])]
-    if subtitle: story += [Paragraph(subtitle.replace("&","&amp;"),styles["Normal"]),Spacer(1,4*mm)]
-    clean=frame.copy().where(pd.notna(frame),"")
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+    out = BytesIO()
+    page_width, _ = landscape(A4)
+    left_margin = right_margin = 7 * mm
+    doc = SimpleDocTemplate(
+        out,
+        pagesize=landscape(A4),
+        rightMargin=right_margin,
+        leftMargin=left_margin,
+        topMargin=8 * mm,
+        bottomMargin=8 * mm,
+        title=str(title),
+    )
+
+    base_styles = getSampleStyleSheet()
+    title_style = base_styles["Title"]
+    title_style.fontName = "Helvetica-Bold"
+    title_style.fontSize = 16
+    title_style.leading = 19
+    title_style.textColor = colors.HexColor("#173D2F")
+
+    subtitle_style = ParagraphStyle(
+        "EichPDFSubtitle", parent=base_styles["Normal"],
+        fontName="Helvetica", fontSize=8, leading=10,
+        textColor=colors.HexColor("#52645B"), spaceAfter=2 * mm,
+    )
+
+    clean = frame.copy().where(pd.notna(frame), "")
     for col in clean.columns:
         if pd.api.types.is_datetime64_any_dtype(clean[col]):
-            clean[col]=pd.to_datetime(clean[col],errors="coerce").dt.strftime("%d-%b-%Y").fillna("")
-    data=[list(map(str,clean.columns))]
-    data += [[str(v)[:160] for v in row] for row in clean.astype(str).values.tolist()]
-    n=max(1,len(data[0])); width=(landscape(A4)[0]-14*mm)/n
-    tbl=Table(data,colWidths=[width]*n,repeatRows=1)
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#17634D")),("TEXTCOLOR",(0,0),(-1,0),colors.white),
-        ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("FONTSIZE",(0,0),(-1,-1),7),("LEADING",(0,0),(-1,-1),8),
-        ("GRID",(0,0),(-1,-1),.35,colors.HexColor("#CAD8D0")),("VALIGN",(0,0),(-1,-1),"TOP"),
-        ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,colors.HexColor("#F1F6F3")]),
-        ("LEFTPADDING",(0,0),(-1,-1),3),("RIGHTPADDING",(0,0),(-1,-1),3),
-        ("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),3)]))
-    story.append(tbl); doc.build(story); return out.getvalue()
+            clean[col] = pd.to_datetime(clean[col], errors="coerce").dt.strftime("%d-%b-%Y").fillna("")
+
+    columns = [str(c) for c in clean.columns]
+    row_values = clean.astype(str).values.tolist()
+    column_count = max(1, len(columns))
+    available_width = page_width - left_margin - right_margin
+
+    # Allocate more space to descriptions, less to compact week/quantity columns.
+    weights = []
+    for name in columns:
+        key = name.strip().lower()
+        if "description" in key or "beschreib" in key or "name" == key:
+            weights.append(3.2)
+        elif key in {"article", "artikel", "article number", "material id", "material_id"} or "article" in key:
+            weights.append(1.35)
+        elif re.fullmatch(r"(?:\d{4}-)?w\s*\d{1,2}", key, flags=re.IGNORECASE):
+            weights.append(0.78)
+        elif any(token in key for token in ("quantity", "qty", "units", "stock", "order lines", "lead_days", "seeds")):
+            weights.append(1.0)
+        else:
+            weights.append(1.25)
+
+    total_weight = sum(weights) or 1.0
+    column_widths = [available_width * weight / total_weight for weight in weights]
+
+    # Keep table text legible when many weekly columns are present.
+    if column_count <= 8:
+        body_font = 7
+    elif column_count <= 13:
+        body_font = 6.5
+    else:
+        body_font = 5.5
+    header_font = max(5.5, body_font - 0.2)
+
+    body_style = ParagraphStyle(
+        "EichPDFCell", fontName="Helvetica", fontSize=body_font,
+        leading=body_font + 1.5, textColor=colors.HexColor("#26352E"),
+        alignment=TA_LEFT, wordWrap="CJK", splitLongWords=1,
+        spaceBefore=0, spaceAfter=0,
+    )
+    header_style = ParagraphStyle(
+        "EichPDFHeader", parent=body_style, fontName="Helvetica-Bold",
+        fontSize=header_font, leading=header_font + 1.2,
+        textColor=colors.white,
+    )
+
+    def as_paragraph(value, style):
+        text_value = "" if value is None else str(value)
+        # Preserve intentional line breaks and safely escape XML-sensitive characters.
+        safe_text = escape(text_value).replace("\n", "<br/>")
+        return Paragraph(safe_text or " ", style)
+
+    data = [[as_paragraph(name, header_style) for name in columns]]
+    for row in row_values:
+        data.append([as_paragraph(value, body_style) for value in row])
+
+    table = Table(
+        data,
+        colWidths=column_widths,
+        repeatRows=1,
+        hAlign="LEFT",
+        splitByRow=1,
+    )
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#123D32")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#CAD8D0")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F1F6F3")]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+
+    story = [Paragraph(escape(str(title)), title_style)]
+    if subtitle:
+        story.extend([Paragraph(escape(str(subtitle)), subtitle_style), Spacer(1, 3 * mm)])
+    story.append(table)
+    doc.build(story)
+    return out.getvalue()
+
 def show_table(frame,key,title,subtitle=""):
     filtered=filter_table(frame,key,title,subtitle)
     st.dataframe(display_frame(filtered),use_container_width=True,hide_index=True,height=470)
