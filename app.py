@@ -474,21 +474,21 @@ def prepare(orders_raw, stock_raw):
             o[c] = ""
         o[c] = o[c].fillna("").astype(str).str.strip()
 
-    # Build a consistent display address from whichever address fields exist.
-    # Prefer the full street + postcode + city; fall back to the source Plz-Ort.
-    def _join_address_parts(row):
+    # Delivery Plan displays PLZ-Ort only (never the street address).
+    # Prefer the workbook's dedicated Plz-Ort field; otherwise combine
+    # postcode and city so workbooks with separate columns still work.
+    def _plz_ort(row):
+        source_value = str(row.get("location_order", "") or "").strip()
+        if source_value and source_value.lower() not in ("nan", "none"):
+            return source_value
         parts = []
-        for field in ("street", "postal_code", "city"):
+        for field in ("postal_code", "city"):
             value = str(row.get(field, "") or "").strip()
             if value and value.lower() not in ("nan", "none"):
                 parts.append(value)
-        combined = ", ".join(parts)
-        fallback = str(row.get("location_order", "") or "").strip()
-        if combined:
-            return combined
-        return "" if fallback.lower() in ("nan", "none") else fallback
+        return " ".join(parts)
 
-    o["address"] = o.apply(_join_address_parts, axis=1)
+    o["address"] = o.apply(_plz_ort, axis=1)
     o["article"] = o["article"].astype("string").str.strip()
     o["description"] = o["description"].fillna("").astype(str) # keep source descriptions exactly; never translate
     o["qty"] = numeric(o["qty"])
@@ -1444,7 +1444,7 @@ elif page=="delivery":
                 "description":T("description"),
                 "order_number":"Order number",
                 "customer":"Customer name",
-                "address":"Address",
+                "address":"PLZ-Ort",
             }
         )
         show_weekly_detail_table(pivot,"del_weekly",T("delivery"),v,"delivery_date","qty","delivery",f"{start:%d-%b-%Y} – {end:%d-%b-%Y}")
