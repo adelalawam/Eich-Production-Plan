@@ -474,10 +474,6 @@ def prepare(orders_raw, stock_raw):
             o[c] = ""
         o[c] = o[c].fillna("").astype(str).str.strip()
 
-    # Delivery Plan's Address column must read ONLY from the Excel
-    # "Plz-Ort" field. Do not substitute Street/Strasse or other fields.
-    o["address"] = o["location_order"].fillna("").astype(str).str.strip()
-    o.loc[o["address"].str.lower().isin(["nan", "none"]), "address"] = ""
     o["article"] = o["article"].astype("string").str.strip()
     o["description"] = o["description"].fillna("").astype(str) # keep source descriptions exactly; never translate
     o["qty"] = numeric(o["qty"])
@@ -1357,6 +1353,51 @@ elif page=="production":
         pivot=pivot[["article","description","material_id","seeds_required"]+weeks].rename(columns={"article":T("article"),"description":T("description"),"material_id":"Material ID","seeds_required":"Seeds required"})
         show_weekly_detail_table(pivot,"prod_weekly",T("production"),v,"production_date","production_required","production",f"{start:%d-%b-%Y} – {end:%d-%b-%Y}")
 
+        # Seed demand follows the original order-quantity week (delivery date),
+        # not the earlier production week and not the post-stock production balance.
+        seed_view = orders.dropna(subset=["delivery_date"]).copy()
+        seed_view = seed_view[
+            (seed_view["delivery_date"].dt.date >= start)
+            & (seed_view["delivery_date"].dt.date <= end)
+        ].copy()
+        st.markdown("### Seeds required by order week")
+        st.caption("Weekly seed demand = order quantity × Required Seeds. It is shown in the same calendar week as the order quantity, before stock allocation.")
+        if seed_view.empty:
+            st.info(T("no_rows"))
+        else:
+            seed_view["Order week"] = seed_view["delivery_date"].apply(
+                lambda d: f"{int(d.isocalendar().year)}-W{int(d.isocalendar().week):02d}"
+            )
+            seed_pivot = seed_view.pivot_table(
+                index=["article", "description", "material_id"],
+                columns="Order week", values="seeds_required",
+                aggfunc="sum", fill_value=0
+            ).reset_index()
+            seed_pivot.columns.name = None
+            seed_week_cols = sorted(
+                [c for c in seed_pivot.columns if re.fullmatch(r"\d{4}-W\d{2}", str(c))],
+                key=lambda w: (int(w[:4]), int(w[-2:]))
+            )
+            seed_totals = seed_view.groupby(
+                ["article", "description", "material_id"], dropna=False, as_index=False
+            ).agg(seeds_required=("seeds_required", "sum"))
+            seed_pivot = seed_pivot.merge(
+                seed_totals, on=["article", "description", "material_id"], how="left"
+            )
+            seed_pivot = seed_pivot[["article", "description", "material_id", "seeds_required"] + seed_week_cols]
+            seed_pivot = seed_pivot.rename(columns={
+                "article": T("article"), "description": T("description"),
+                "material_id": "Material ID", "seeds_required": "Seeds required"
+            })
+            st.dataframe(
+                seed_pivot, use_container_width=True, hide_index=True,
+                height=min(470, 90 + 35 * len(seed_pivot)),
+                column_config={
+                    "Seeds required": st.column_config.NumberColumn("Seeds required", format="%.1f"),
+                    **{w: st.column_config.NumberColumn(w, format="%.1f") for w in seed_week_cols}
+                }
+            )
+
     st.divider()
     if "production_progress_visible" not in st.session_state:
         st.session_state["production_progress_visible"] = False
@@ -1409,7 +1450,7 @@ elif page=="delivery":
 
         # Preserve order-level context in the article/week view. If an article
         # has multiple orders in the selected date range, show each distinct
-        # order/customer/address once, separated by a readable delimiter.
+        # order number and customer once, separated by a readable delimiter.
         def _unique_display_values(series):
             values=[]
             for value in series.fillna("").astype(str):
@@ -1423,17 +1464,15 @@ elif page=="delivery":
             .agg(
                 order_number=("order_number", _unique_display_values),
                 customer=("customer", _unique_display_values),
-                address=("address", _unique_display_values),
             )
         )
         pivot = pivot.merge(delivery_meta, on=["article","description"], how="left")
-        pivot = pivot[["article","description","order_number","customer","address"]+weeks].rename(
+        pivot = pivot[["article","description","order_number","customer"]+weeks].rename(
             columns={
                 "article":T("article"),
                 "description":T("description"),
                 "order_number":"Order number",
                 "customer":"Customer name",
-                "address":"Address",
             }
         )
         show_weekly_detail_table(pivot,"del_weekly",T("delivery"),v,"delivery_date","qty","delivery",f"{start:%d-%b-%Y} – {end:%d-%b-%Y}")
