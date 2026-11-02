@@ -55,13 +55,18 @@ if not st.session_state.authenticated:
         z-index:10;
     }
     [data-testid="stForm"] [data-testid="stTextInput"] {
-        margin:0!important;
+        width:90%!important;
+        max-width:90%!important;
+        margin:0 auto!important;
         padding:0!important;
+        box-sizing:border-box!important;
     }
     [data-testid="stForm"] [data-testid="stTextInput"] label {
         display:none!important;
     }
     [data-testid="stForm"] input {
+        box-sizing:border-box!important;
+        max-width:100%!important;
         height:clamp(48px,6.4vh,62px)!important;
         min-height:clamp(48px,6.4vh,62px)!important;
         width:100%!important;
