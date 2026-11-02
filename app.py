@@ -417,43 +417,32 @@ def save_progress(obj):
     cloud_save_state(progress=obj)
 def pkey(kind,year,article,week): return f"{kind}|{int(year)}|{str(article)}|{int(week):02d}"
 
-# ---------- Column filters, sorting, PDF and filtered exports ----------
+# ---------- Column filters, PDF and filtered exports ----------
 def filter_table(frame, key):
     result = frame.copy()
     columns = list(result.columns)
-    # Restore the compact single Article filter used in the earlier layout.
-    article_col = next((c for c in columns if normalize(c) in {"article", "artikel", "articlenumber", "artikelnummer", "articleid"}), None)
+
+    # Keep the Article filter; sorting and reset controls have been removed.
+    article_col = next(
+        (c for c in columns if normalize(c) in {
+            "article", "artikel", "articlenumber", "artikelnummer", "articleid"
+        }),
+        None,
+    )
     if article_col is not None:
-        c_filter, c_sort, c_reset = st.columns([2.4, 2.4, 1])
+        c_filter, = st.columns([2.4])
         with c_filter:
-            vals = sorted(result[article_col].dropna().astype(str).unique().tolist(), key=str.casefold)
+            vals = sorted(
+                result[article_col].dropna().astype(str).unique().tolist(),
+                key=str.casefold,
+            )
             options = [T("all_articles")] + vals
-            selected = st.selectbox(T("article_filter"), options, index=0, key=f"{key}_article_filter")
+            selected = st.selectbox(
+                T("article_filter"), options, index=0, key=f"{key}_article_filter"
+            )
             if selected != T("all_articles"):
                 result = result[result[article_col].astype(str) == selected]
-        with c_sort:
-            sortcol = st.selectbox(T("sort"), ["—"] + list(result.columns), key=f"{key}_sortcol")
-        with c_reset:
-            st.write("")
-            if st.button(T("reset"), key=f"{key}_reset", use_container_width=True):
-                for k in list(st.session_state.keys()):
-                    if k.startswith(key + "_"):
-                        del st.session_state[k]
-                st.rerun()
-    else:
-        c_sort, c_reset = st.columns([3, 1])
-        with c_sort:
-            sortcol = st.selectbox(T("sort"), ["—"] + list(result.columns), key=f"{key}_sortcol")
-        with c_reset:
-            st.write("")
-            if st.button(T("reset"), key=f"{key}_reset", use_container_width=True):
-                for k in list(st.session_state.keys()):
-                    if k.startswith(key + "_"):
-                        del st.session_state[k]
-                st.rerun()
-    if sortcol != "—":
-        direction = st.radio(T("ascending") + " / " + T("descending"), [T("ascending"), T("descending")], horizontal=True, key=f"{key}_direction")
-        result = result.sort_values(sortcol, ascending=direction == T("ascending"), na_position="last", kind="stable")
+
     st.caption(f"{T('rows')}: {german_number(len(result))} / {german_number(len(frame))}")
     return result
 
@@ -1121,4 +1110,3 @@ elif page=="exports":
         f"Export period: {shared_start:%d/%m/%Y} – {shared_end:%d/%m/%Y}. "
         "Orders and Delivery Plan use Delivery Date; Production Plan uses Production Date. "
         "Stock is included as the current inventory snapshot."
-    )
