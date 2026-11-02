@@ -1345,58 +1345,20 @@ elif page=="production":
             if _label not in weeks: weeks.append(_label)
         weeks.sort(key=lambda _w: (int(_w[:4]), int(_w[-2:])))
         v["Week"]=v["production_date"].apply(lambda d:f"{int(d.isocalendar().year)}-W{int(d.isocalendar().week):02d}")
-        pivot=v.pivot_table(index=["article","description","material_id"],columns="Week",values="production_required",aggfunc="sum",fill_value=0).reset_index(); pivot.columns.name=None
-        seed_totals=v.groupby(["article","description","material_id"],dropna=False,as_index=False).agg(seeds_required=("seeds_required","sum"))
+        # Production Plan weekly seed demand is independent of stock availability.
+        # Allocate each order's qty * Required Seeds factor to that order's
+        # production week; never subtract or cap it using Material ID stock.
+        v["weekly_seeds_required"] = (
+            pd.to_numeric(v["qty"], errors="coerce").fillna(0).clip(lower=0)
+            * pd.to_numeric(v["seeds_per_article"], errors="coerce").fillna(0).clip(lower=0)
+        )
+        pivot=v.pivot_table(index=["article","description","material_id"],columns="Week",values="weekly_seeds_required",aggfunc="sum",fill_value=0).reset_index(); pivot.columns.name=None
+        seed_totals=v.groupby(["article","description","material_id"],dropna=False,as_index=False).agg(seeds_required=("weekly_seeds_required","sum"))
         pivot=pivot.merge(seed_totals,on=["article","description","material_id"],how="left")
         for w in weeks:
             if w not in pivot.columns: pivot[w]=0
         pivot=pivot[["article","description","material_id","seeds_required"]+weeks].rename(columns={"article":T("article"),"description":T("description"),"material_id":"Material ID","seeds_required":"Seeds required"})
-        show_weekly_detail_table(pivot,"prod_weekly",T("production"),v,"production_date","production_required","production",f"{start:%d-%b-%Y} – {end:%d-%b-%Y}")
-
-        # Seed demand follows the original order-quantity week (delivery date),
-        # not the earlier production week and not the post-stock production balance.
-        seed_view = orders.dropna(subset=["delivery_date"]).copy()
-        seed_view = seed_view[
-            (seed_view["delivery_date"].dt.date >= start)
-            & (seed_view["delivery_date"].dt.date <= end)
-        ].copy()
-        st.markdown("### Seeds required by order week")
-        st.caption("Weekly seed demand = order quantity × Required Seeds. It is shown in the same calendar week as the order quantity, before stock allocation.")
-        if seed_view.empty:
-            st.info(T("no_rows"))
-        else:
-            seed_view["Order week"] = seed_view["delivery_date"].apply(
-                lambda d: f"{int(d.isocalendar().year)}-W{int(d.isocalendar().week):02d}"
-            )
-            seed_pivot = seed_view.pivot_table(
-                index=["article", "description", "material_id"],
-                columns="Order week", values="seeds_required",
-                aggfunc="sum", fill_value=0
-            ).reset_index()
-            seed_pivot.columns.name = None
-            seed_week_cols = sorted(
-                [c for c in seed_pivot.columns if re.fullmatch(r"\d{4}-W\d{2}", str(c))],
-                key=lambda w: (int(w[:4]), int(w[-2:]))
-            )
-            seed_totals = seed_view.groupby(
-                ["article", "description", "material_id"], dropna=False, as_index=False
-            ).agg(seeds_required=("seeds_required", "sum"))
-            seed_pivot = seed_pivot.merge(
-                seed_totals, on=["article", "description", "material_id"], how="left"
-            )
-            seed_pivot = seed_pivot[["article", "description", "material_id", "seeds_required"] + seed_week_cols]
-            seed_pivot = seed_pivot.rename(columns={
-                "article": T("article"), "description": T("description"),
-                "material_id": "Material ID", "seeds_required": "Seeds required"
-            })
-            st.dataframe(
-                seed_pivot, use_container_width=True, hide_index=True,
-                height=min(470, 90 + 35 * len(seed_pivot)),
-                column_config={
-                    "Seeds required": st.column_config.NumberColumn("Seeds required", format="%.1f"),
-                    **{w: st.column_config.NumberColumn(w, format="%.1f") for w in seed_week_cols}
-                }
-            )
+        show_weekly_detail_table(pivot,"prod_weekly",T("production"),v,"production_date","weekly_seeds_required","production",f"{start:%d-%b-%Y} – {end:%d-%b-%Y}")
 
     st.divider()
     if "production_progress_visible" not in st.session_state:
