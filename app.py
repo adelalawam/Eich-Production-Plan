@@ -1338,7 +1338,7 @@ elif page=="production":
             if _label not in weeks: weeks.append(_label)
         weeks.sort(key=lambda _w: (int(_w[:4]), int(_w[-2:])))
         v["Week"]=v["production_date"].apply(lambda d:f"{int(d.isocalendar().year)}-W{int(d.isocalendar().week):02d}")
-        pivot=v.pivot_table(index=["article","description","material_id"],columns="Week",values="production_required",aggfunc="sum",fill_value=0).reset_index(); pivot.columns.name=None
+        pivot=v.pivot_table(index=["article","description","material_id"],columns="Week",values="seeds_required",aggfunc="sum",fill_value=0).reset_index(); pivot.columns.name=None
         seed_totals=v.groupby(["article","description","material_id"],dropna=False,as_index=False).agg(seeds_required=("seeds_required","sum"))
         pivot=pivot.merge(seed_totals,on=["article","description","material_id"],how="left")
         for w in weeks:
