@@ -464,7 +464,7 @@ def prepare(orders_raw, stock_raw):
         "street":find_column(o,["Street","Street Address","Address","Delivery Address","Shipping Address","Straße","Strasse","Lieferstraße","Lieferstrasse"]),
         "postal_code":find_column(o,["Postal Code","Postcode","Post Code","ZIP","ZIP Code","PLZ","Postleitzahl"]),
         "city":find_column(o,["City","Town","Ort","Stadt","Lieferort"]),
-        "location_order":find_column(o,["Plz-Ort","PLZ-Ort","Ort","Postcode City","Postal Code City"]),
+        "location_order":find_column(o,["Plz-Ort","PLZ-Ort"]),
     }
     missing = [k for k in ("article","qty","delivery_date") if oc[k] is None]
     if missing: raise ValueError("Missing required Orders columns: "+", ".join(missing)+". Required: Article Number, Order Qty, Delivery Date.")
@@ -474,21 +474,10 @@ def prepare(orders_raw, stock_raw):
             o[c] = ""
         o[c] = o[c].fillna("").astype(str).str.strip()
 
-    # Delivery Plan displays PLZ-Ort only (never the street address).
-    # Prefer the workbook's dedicated Plz-Ort field; otherwise combine
-    # postcode and city so workbooks with separate columns still work.
-    def _plz_ort(row):
-        source_value = str(row.get("location_order", "") or "").strip()
-        if source_value and source_value.lower() not in ("nan", "none"):
-            return source_value
-        parts = []
-        for field in ("postal_code", "city"):
-            value = str(row.get(field, "") or "").strip()
-            if value and value.lower() not in ("nan", "none"):
-                parts.append(value)
-        return " ".join(parts)
-
-    o["address"] = o.apply(_plz_ort, axis=1)
+    # Delivery Plan's Address column must read ONLY from the Excel
+    # "Plz-Ort" field. Do not substitute Street/Strasse or other fields.
+    o["address"] = o["location_order"].fillna("").astype(str).str.strip()
+    o.loc[o["address"].str.lower().isin(["nan", "none"]), "address"] = ""
     o["article"] = o["article"].astype("string").str.strip()
     o["description"] = o["description"].fillna("").astype(str) # keep source descriptions exactly; never translate
     o["qty"] = numeric(o["qty"])
@@ -1444,7 +1433,7 @@ elif page=="delivery":
                 "description":T("description"),
                 "order_number":"Order number",
                 "customer":"Customer name",
-                "address":"PLZ-Ort",
+                "address":"Address",
             }
         )
         show_weekly_detail_table(pivot,"del_weekly",T("delivery"),v,"delivery_date","qty","delivery",f"{start:%d-%b-%Y} – {end:%d-%b-%Y}")
