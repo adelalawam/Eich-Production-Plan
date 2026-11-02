@@ -44,7 +44,7 @@ if not st.session_state.authenticated:
     [data-testid="stForm"] {
         position:fixed!important;
         left:24.0vw!important;
-        top:60.5vh!important;
+        top:63vh!important;
         width:52.0vw!important;
         max-width:none!important;
         margin:0!important;
@@ -107,7 +107,7 @@ if not st.session_state.authenticated:
         }
         [data-testid="stForm"] {
             left:23vw!important;
-            top:60.5vh!important;
+            top:63vh!important;
             width:54vw!important;
         }
         [data-testid="stForm"] input {padding:0 34px!important;font-size:14px!important;}
