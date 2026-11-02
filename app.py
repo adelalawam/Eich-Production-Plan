@@ -382,7 +382,7 @@ with st.sidebar:
     st.caption("PRODUCTION PLANNING")
     st.selectbox("Language / Sprache", ["English","Deutsch"], key="language")
     st.divider()
-    nav = [T("dashboard"),T("production"),T("delivery"),T("progress"),T("exports")]
+    nav = [T("dashboard"),T("production"),T("delivery"),T("exports")]
     page_label = st.radio("Navigation", nav, label_visibility="collapsed", key="nav")
     st.divider()
     uploaded = st.file_uploader(T("upload"), type=["xlsx"], key="xlsx_upload")
@@ -997,7 +997,7 @@ delivery_plan = calculated["delivery_plan"]
 years = calculated["years"]
 year = calculated["year"]
 
-page_map={T("dashboard"):"dashboard",T("production"):"production",T("delivery"):"delivery",T("progress"):"progress",T("exports"):"exports"}
+page_map={T("dashboard"):"dashboard",T("production"):"production",T("delivery"):"delivery",T("exports"):"exports"}
 page=page_map[page_label]
 
 # ---------- Shared date range (all tabs, including Exports) ----------
@@ -1023,6 +1023,46 @@ with date_col_b:
 if shared_start > shared_end:
     st.error(T("date_error"))
     st.stop()
+
+def render_plan_progress(kind, start_date, end_date):
+    """Show saved completion records for one plan within the selected date range."""
+    all_progress = load_progress()
+    rows = []
+    for key, value in all_progress.items():
+        parts = key.split("|", 3)
+        if len(parts) != 4 or parts[0] != kind:
+            continue
+        try:
+            year_num = int(parts[1])
+            week_num = int(parts[3])
+            week_start = date.fromisocalendar(year_num, week_num, 1)
+            week_end = week_start + pd.Timedelta(days=6)
+            if week_start > end_date or week_end < start_date:
+                continue
+            quantity = float(value or 0)
+        except (ValueError, TypeError):
+            continue
+        rows.append({
+            "Year": year_num,
+            "Article": parts[2],
+            "Week": f"W{week_num:02d}",
+            "Completed": quantity > 0,
+            "Completed quantity": quantity,
+        })
+
+    completed = sum(1 for row in rows if row["Completed"])
+    tracked = len(rows)
+    metrics = st.columns(3)
+    metrics[0].metric("Completed article-weeks", german_number(completed))
+    metrics[1].metric("Tracked article-weeks", german_number(tracked))
+    metrics[2].metric("Completion rate", f"{completed / tracked * 100:.1f}%" if tracked else "0.0%")
+    if rows:
+        progress_frame = pd.DataFrame(rows).sort_values(
+            ["Year", "Week", "Article"], kind="stable"
+        )
+        st.dataframe(progress_frame, use_container_width=True, hide_index=True)
+    else:
+        st.info("No completion records are available for this plan in the selected date range.")
 
 # ---------- Overview ----------
 if page=="dashboard":
@@ -1174,6 +1214,19 @@ elif page=="production":
         pivot=pivot[["article","description","material_id","seeds_required"]+weeks].rename(columns={"article":T("article"),"description":T("description"),"material_id":"Material ID","seeds_required":"Seeds required"})
         show_weekly_detail_table(pivot,"prod_weekly",T("production"),v,"production_date","production_required","production",f"{start:%d-%b-%Y} – {end:%d-%b-%Y}")
 
+    st.divider()
+    if "production_progress_visible" not in st.session_state:
+        st.session_state["production_progress_visible"] = False
+    if st.button(
+        "Hide Progress" if st.session_state["production_progress_visible"] else "Show Progress",
+        key="toggle_production_progress",
+        use_container_width=False,
+    ):
+        st.session_state["production_progress_visible"] = not st.session_state["production_progress_visible"]
+    if st.session_state["production_progress_visible"]:
+        st.markdown(f"<div class='section-title'>{T('progress')} · Production</div>", unsafe_allow_html=True)
+        render_plan_progress("production", start, end)
+
 # ---------- Delivery planning ----------
 elif page=="delivery":
     st.markdown(f"<div class='section-title'>{T('del_title')}</div><div class='section-sub'>{T('del_sub')}</div>",unsafe_allow_html=True)
@@ -1197,40 +1250,18 @@ elif page=="delivery":
         pivot=pivot[["article","description"]+weeks].rename(columns={"article":T("article"),"description":T("description")})
         show_weekly_detail_table(pivot,"del_weekly",T("delivery"),v,"delivery_date","qty","delivery",f"{start:%d-%b-%Y} – {end:%d-%b-%Y}")
 
-# ---------- Progress tracker ----------
-elif page=="progress":
-    st.markdown(f"<div class='section-title'>{T('progress')}</div><div class='section-sub'>{T('progress_note')}</div>",unsafe_allow_html=True)
-    all_progress = load_progress()
-    prog = {}
-    for progress_key, progress_value in all_progress.items():
-        parts = progress_key.split("|", 3)
-        if len(parts) == 4:
-            try:
-                week_start = date.fromisocalendar(int(parts[1]), int(parts[3]), 1)
-                week_end = week_start + pd.Timedelta(days=6)
-                if week_start <= shared_end and week_end >= shared_start:
-                    prog[progress_key] = progress_value
-            except (ValueError, TypeError):
-                continue
-    completed = sum(1 for value in prog.values() if float(value or 0) > 0)
-    m = st.columns(3)
-    m[0].metric("Completed article-weeks", german_number(completed))
-    m[1].metric("Tracked article-weeks", german_number(len(prog)))
-    m[2].metric("Completion rate", f"{(completed / len(prog) * 100):.1f}%" if prog else "0.0%")
-    if prog:
-        progress_rows=[]
-        for k,value in prog.items():
-            parts=k.split("|",3)
-            if len(parts)==4:
-                kind,yr,article,wk=parts
-                progress_rows.append({"Plan":kind.title(),"Year":yr,"Article":article,"Week":f"W{wk}","Completed":bool(float(value or 0)>0),"Completed quantity":float(value or 0)})
-        if progress_rows:
-            st.dataframe(pd.DataFrame(progress_rows),use_container_width=True,hide_index=True)
-        if st.button("Reset all completion marks", type="secondary"):
-            save_progress({})
-            st.rerun()
-    else:
-        st.info("No production or delivery weeks have been marked complete yet.")
+    st.divider()
+    if "delivery_progress_visible" not in st.session_state:
+        st.session_state["delivery_progress_visible"] = False
+    if st.button(
+        "Hide Progress" if st.session_state["delivery_progress_visible"] else "Show Progress",
+        key="toggle_delivery_progress",
+        use_container_width=False,
+    ):
+        st.session_state["delivery_progress_visible"] = not st.session_state["delivery_progress_visible"]
+    if st.session_state["delivery_progress_visible"]:
+        st.markdown(f"<div class='section-title'>{T('progress')} · Delivery</div>", unsafe_allow_html=True)
+        render_plan_progress("delivery", start, end)
 
 # ---------- Data quality ----------
 elif page=="quality":
