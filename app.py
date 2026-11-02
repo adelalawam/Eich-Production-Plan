@@ -1106,7 +1106,4 @@ elif page=="exports":
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         type="primary"
     )
-    st.caption(
-        f"Export period: {shared_start:%d/%m/%Y} – {shared_end:%d/%m/%Y}. "
-        "Orders and Delivery Plan use Delivery Date; Production Plan uses Production Date. "
-        "Stock is included as the current inventory snapshot."
+    st.caption(f"Export period: {shared_start:%d/%m/%Y} – {shared_end:%d/%m/%Y}. Orders and Delivery Plan use Delivery Date; Production Plan uses Production Date. Stock is included as the current inventory snapshot.")
