@@ -1014,7 +1014,19 @@ if "calculated_workbook" not in st.session_state:
     }
 
 calculated = st.session_state["calculated_workbook"]
-orders = calculated["orders"]
+orders = calculated["orders"].copy()
+
+# Backward-compatible repair for Streamlit sessions that still hold a
+# calculated dataframe created before the Street column was introduced.
+# The original imported Orders dataframe remains the authoritative source.
+source_orders = data.get("orders", pd.DataFrame())
+for _address_col in ("customer", "location_order", "street"):
+    if _address_col not in orders.columns:
+        if _address_col in source_orders.columns:
+            orders[_address_col] = source_orders[_address_col].reindex(orders.index).fillna("")
+        else:
+            orders[_address_col] = ""
+
 stock = calculated["stock"]
 stock_total = calculated["stock_total"]
 article_summary = calculated["article_summary"]
@@ -1430,7 +1442,9 @@ elif page=="route":
         route_orders["_route_date"] = route_orders["delivery_date"].dt.strftime("%Y-%m-%d")
         route_orders["_route_customer"] = route_orders["customer"].fillna("").astype(str).str.strip()
         route_orders["_route_place"] = route_orders["location_order"].fillna("").astype(str).str.strip()
-        route_orders["_route_street"] = route_orders["street"].fillna("").astype(str).str.strip()
+        route_orders["_route_street"] = route_orders.get(
+            "street", pd.Series("", index=route_orders.index)
+        ).fillna("").astype(str).str.strip()
         route_orders["_route_group"] = (
             route_orders["_route_customer"].replace("", "Customer not specified") + " | " +
             route_orders["_route_place"].replace("", "Location not specified") + " | " +
