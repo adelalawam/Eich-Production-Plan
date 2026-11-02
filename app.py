@@ -382,7 +382,7 @@ with st.sidebar:
     st.caption("PRODUCTION PLANNING")
     st.selectbox("Language / Sprache", ["English","Deutsch"], key="language")
     st.divider()
-    nav = [T("dashboard"),T("production"),T("delivery"),T("progress"),T("stock"),T("exports")]
+    nav = [T("dashboard"),T("production"),T("delivery"),T("progress"),T("exports")]
     page_label = st.radio("Navigation", nav, label_visibility="collapsed", key="nav")
     st.divider()
     uploaded = st.file_uploader(T("upload"), type=["xlsx"], key="xlsx_upload")
@@ -434,7 +434,7 @@ def prepare(orders_raw, stock_raw):
         "available_stock":find_column(s,["Stock","Lagerbestand","Bestand","Available Stock","Lager","Quantity in Stock","Menge","Qty"]),
         "location":find_column(s,["StdLager","Lagerort","Storage","Location"]),
         "material_id":find_column(s,["Material ID","MaterialID","Materialnummer","Material Number","Seed Material ID","Saatgutnummer","Rohstoffnummer"]),
-        "seeds_per_article":find_column(s,["Seeds per Article","Seeds per Unit","Seed Factor","Seeds","Saatgut je Artikel","Samen je Artikel","Anzahl Samen","Seed Qty per Article","Material Qty per Article","Verbrauch je Artikel","Menge je Artikel"]),
+        "seeds_per_article":find_column(s,["Required Seeds","Seeds per Article","Seeds per Unit","Seed Factor","Seeds","Saatgut je Artikel","Samen je Artikel","Anzahl Samen","Seed Qty per Article","Material Qty per Article","Verbrauch je Artikel","Menge je Artikel"]),
     }
     if sc["article"] is None or sc["available_stock"] is None:
         raise ValueError("Stock sheet needs an article number and a stock quantity column.")
@@ -451,11 +451,24 @@ def prepare(orders_raw, stock_raw):
     s["material_id"] = s["material_id"].fillna("").astype(str).str.strip()
     s["description_stock"] = s["description_stock"].fillna("").astype(str)
     s = s[s["article"].notna() & s["article"].ne("")].copy()
-    s = s.groupby("article",as_index=False).agg(description_stock=("description_stock","first"),lead_days=("lead_days","max"),available_stock=("available_stock","sum"),material_id=("material_id","first"),seeds_per_article=("seeds_per_article","max"))
+    # Stock is a material-level balance. The same balance is repeated on
+    # every Article row that consumes that Material ID, so never sum it by
+    # Article. Keep the source value once per Article and later deduplicate
+    # inventory by Material ID for allocation and total-stock reporting.
+    s = s.groupby("article",as_index=False).agg(
+        description_stock=("description_stock","first"),
+        lead_days=("lead_days","max"),
+        available_stock=("available_stock","first"),
+        material_id=("material_id","first"),
+        seeds_per_article=("seeds_per_article","max")
+    )
     o = o.merge(s[["article","lead_days","available_stock","description_stock","material_id","seeds_per_article"]],on="article",how="left")
     o["material_id"] = o["material_id"].fillna("")
     o["seeds_per_article"] = numeric(o["seeds_per_article"])
-    o["seeds_required"] = o["qty"].clip(lower=0) * 1.05
+    # Required Seeds is the material consumption factor per finished Article.
+    # Do not apply an additional arbitrary percentage: the workbook supplies
+    # the actual factor for each Article.
+    o["seeds_required"] = o["qty"].clip(lower=0) * o["seeds_per_article"].clip(lower=0)
     o["description"] = o["description"].where(o["description"].str.strip().ne(""),o["description_stock"].fillna(""))
     o["lead_days"] = numeric(o["lead_days"])
     o["production_date"] = o["delivery_date"] - pd.to_timedelta(o["lead_days"],unit="D")
@@ -865,40 +878,64 @@ if "calculated_workbook" not in st.session_state:
     orders = data["orders"].copy()
     stock = data["stock"].copy()
 
-    # FIFO stock allocation, vectorised by article (no Python row-by-row loop).
+    # FIFO stock allocation by shared Material ID.
+    # Stock is stored in material units; Required Seeds is material units
+    # consumed per finished Article. Multiple Articles can consume the same
+    # Material ID, so the balance is shared and deducted chronologically.
     orders["production_required"] = (
         pd.to_numeric(orders["qty"], errors="coerce").fillna(0).clip(lower=0).astype("float64")
     )
-    for _col in ("stock_at_start", "stock_allocated", "remaining_stock_after_order"):
+    orders["material_required"] = (
+        orders["production_required"] * pd.to_numeric(
+            orders["seeds_per_article"], errors="coerce"
+        ).fillna(0).clip(lower=0)
+    )
+    for _col in (
+        "stock_at_start", "stock_allocated", "remaining_stock_after_order",
+        "material_stock_allocated", "remaining_material_stock"
+    ):
         orders[_col] = 0.0
 
+    # One authoritative opening balance per Material ID. The workbook repeats
+    # the same Stock figure for each Article using that material.
+    material_stock = (
+        stock[stock["material_id"].fillna("").astype(str).str.strip().ne("")]
+        .drop_duplicates(subset=["material_id"], keep="first")
+        .set_index("material_id")["available_stock"]
+        .clip(lower=0).astype("float64")
+    )
+    stock_total = float(material_stock.sum())
+
     orders = orders.sort_values(
-        ["delivery_date", "article"], na_position="last", kind="stable"
+        ["production_date", "article"],
+        na_position="last", kind="stable"
     ).copy()
 
-    valid_delivery = orders["delivery_date"].notna()
-    alloc_rows = orders.loc[valid_delivery]
-    if not alloc_rows.empty:
-        alloc_qty = pd.to_numeric(alloc_rows["qty"], errors="coerce").fillna(0).clip(lower=0)
-        stock_by_row = (
-            alloc_rows["article"].map(stock.set_index("article")["available_stock"])
-            .fillna(0).clip(lower=0).astype("float64")
-        )
-        cumulative_qty = alloc_qty.groupby(alloc_rows["article"], sort=False).cumsum()
-        previous_qty = cumulative_qty - alloc_qty
-        stock_at_start = (stock_by_row - previous_qty).clip(lower=0)
-        allocated = pd.Series(
-            np.minimum(stock_at_start.to_numpy(), alloc_qty.to_numpy()),
-            index=alloc_rows.index, dtype="float64"
-        )
-        remaining_after = (stock_by_row - cumulative_qty).clip(lower=0)
+    # Material is consumed when production starts, so FIFO follows the
+    # calculated Production Date (Delivery Date minus Production Days).
+    valid_production = orders["production_date"].notna()
+    for material_id, group in orders.loc[valid_production].groupby("material_id", sort=False, dropna=False):
+        material_key = str(material_id).strip() if pd.notna(material_id) else ""
+        if not material_key or material_key not in material_stock.index:
+            continue
+        balance = float(material_stock.loc[material_key])
+        for idx, row in group.iterrows():
+            qty = max(0.0, float(row.get("qty", 0) or 0))
+            seed_factor = max(0.0, float(row.get("seeds_per_article", 0) or 0))
+            material_need = qty * seed_factor
+            material_used = min(balance, material_need) if seed_factor > 0 else 0.0
+            article_equivalent = material_used / seed_factor if seed_factor > 0 else 0.0
+            balance = max(0.0, balance - material_used)
 
-        orders.loc[valid_delivery, "stock_at_start"] = stock_at_start
-        orders.loc[valid_delivery, "stock_allocated"] = allocated
-        orders.loc[valid_delivery, "remaining_stock_after_order"] = remaining_after
-        orders.loc[valid_delivery, "production_required"] = (alloc_qty - allocated).clip(lower=0)
+            orders.at[idx, "stock_at_start"] = balance + material_used
+            orders.at[idx, "material_stock_allocated"] = material_used
+            orders.at[idx, "stock_allocated"] = article_equivalent
+            orders.at[idx, "remaining_material_stock"] = balance
+            orders.at[idx, "remaining_stock_after_order"] = (
+                balance / seed_factor if seed_factor > 0 else 0.0
+            )
+            orders.at[idx, "production_required"] = max(0.0, qty - article_equivalent)
 
-    stock_total = stock["available_stock"].sum()
     demand = orders.groupby("article", as_index=False).agg(
         ordered_qty=("qty", "sum"), order_lines=("qty", "size")
     )
@@ -960,7 +997,7 @@ delivery_plan = calculated["delivery_plan"]
 years = calculated["years"]
 year = calculated["year"]
 
-page_map={T("dashboard"):"dashboard",T("production"):"production",T("delivery"):"delivery",T("progress"):"progress",T("stock"):"stock",T("exports"):"exports"}
+page_map={T("dashboard"):"dashboard",T("production"):"production",T("delivery"):"delivery",T("progress"):"progress",T("exports"):"exports"}
 page=page_map[page_label]
 
 # ---------- Shared date range (all tabs, including Exports) ----------
@@ -1194,29 +1231,6 @@ elif page=="progress":
             st.rerun()
     else:
         st.info("No production or delivery weeks have been marked complete yet.")
-
-# ---------- Stock and articles ----------
-elif page=="stock":
-    st.markdown(f"<div class='section-title'>{T('stock_title')}</div><div class='section-sub'>{T('stock_sub')}</div>",unsafe_allow_html=True)
-    stock_period_orders = orders.dropna(subset=["delivery_date"]).copy()
-    stock_period_orders = stock_period_orders[
-        (stock_period_orders["delivery_date"].dt.date >= shared_start)
-        & (stock_period_orders["delivery_date"].dt.date <= shared_end)
-    ]
-    period_demand = stock_period_orders.groupby("article",as_index=False).agg(
-        ordered_qty=("qty","sum"), order_lines=("qty","size")
-    )
-    period_alloc = stock_period_orders.groupby("article",as_index=False).agg(
-        stock_allocated_total=("stock_allocated","sum"),
-        production_required_total=("production_required","sum")
-    )
-    period_summary = stock.merge(period_demand,on="article",how="left").merge(period_alloc,on="article",how="left")
-    for c in ["ordered_qty","order_lines","stock_allocated_total","production_required_total"]:
-        period_summary[c] = period_summary[c].fillna(0)
-    period_summary["shortage"] = period_summary["production_required_total"]
-    display=period_summary.rename(columns={"article":T("article"),"description_stock":T("description"),"available_stock":T("stock_units"),"ordered_qty":T("ordered"),"order_lines":T("lines"),"stock_allocated_total":T("stock_allocated"),"production_required_total":T("required"),"shortage":T("shortage")}).sort_values(T("shortage"),ascending=False)
-    m=st.columns(3); m[0].metric(T("stock_units"),german_number(period_summary['available_stock'].sum())); m[1].metric(T("ordered"),german_number(period_summary['ordered_qty'].sum())); m[2].metric(T("shortage"),german_number(int((period_summary['shortage']>0).sum())))
-    show_table(display,"stock_table",T("stock"))
 
 # ---------- Data quality ----------
 elif page=="quality":
