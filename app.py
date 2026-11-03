@@ -1,6 +1,6 @@
 import json, re, sys, os, base64
 from pathlib import Path
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from io import BytesIO
 import pandas as pd
 import numpy as np
@@ -1056,14 +1056,16 @@ page_map={T("dashboard"):"dashboard",T("production"):"production",T("delivery"):
 page=page_map[page_label]
 
 # ---------- Shared date range (all tabs, including Exports) ----------
-# Initialise once per Streamlit session. The same widget keys are used on every
-# tab, so changing either date anywhere updates the shared range everywhere.
-# Values remain unchanged during reruns and tab navigation; a fresh app session
-# starts again with today's date.
-if "shared_from_date" not in st.session_state:
-    st.session_state["shared_from_date"] = date.today()
-if "shared_to_date" not in st.session_state:
-    st.session_state["shared_to_date"] = date.today()
+# Initialise once per Streamlit session to the current Monday-Sunday week.
+# The same widget keys are used on every tab, so changing either date anywhere
+# updates the shared range everywhere. Values remain unchanged during reruns
+# and tab navigation; a fresh app session starts with the current calendar week.
+if "shared_from_date" not in st.session_state or "shared_to_date" not in st.session_state:
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())  # Monday
+    week_end = week_start + timedelta(days=6)             # Sunday
+    st.session_state["shared_from_date"] = week_start
+    st.session_state["shared_to_date"] = week_end
 
 st.markdown("<div class='section-title'>Date range</div>", unsafe_allow_html=True)
 date_col_a, date_col_b = st.columns(2)
